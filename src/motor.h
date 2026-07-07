@@ -9,5 +9,7 @@ struct Motor {
     Motor(int input_pin1, int input_pin2);
    //negative speed = backwards 
    void drive(float speed);
+   void drive_distance(float distance, float speed = 1.0f);
+
 
 };

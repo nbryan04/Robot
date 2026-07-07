@@ -9,3 +9,8 @@ void Motor::drive(float speed) {
 
     
       }
+
+void Motor::drive_distance(float distance, float speed) {
+}
+
+
