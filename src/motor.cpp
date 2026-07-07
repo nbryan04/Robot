@@ -31,7 +31,7 @@ void Motor::drive(float speed) {
 void Motor::drive_distance(float distance, float speed) {
 }
 
-
+//temporary method
 void Motor::one_turn(void) {
     num = 0;
     while(num <= 1441) {
