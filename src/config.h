@@ -7,6 +7,7 @@ inline constexpr int MAX_DUTY = 1023;
 inline constexpr int PWM_RESOLUTION = 10;
 inline constexpr int MOTOR1_POLARITY = 1;
 inline constexpr int MOTOR2_POLARITY = 1;
+inline constexpr int DOWNSAMPLING_FACTOR = 10;
 
 
 //Physical Constants 

@@ -1,9 +1,9 @@
 #include "config.h"
-#include <CircularBuffer.h>
 #include "esp32-hal-gpio.h"
 #include "esp32-hal-ledc.h"
 #include "motor.h"
 #include <Arduino.h>
+#include <CircularBuffer.h>
 // TODO:
 // PWM control
 // Proper implementation of counter (interrupt)
@@ -22,6 +22,7 @@ Motor::Motor(int p1, int p2, int ePin1, int ePin2, float diameter,
   encoderPin1 = ePin1;
   encoderPin2 = ePin2;
   encoderCount = 0;
+  sampleCount = 0;
   wheelDiameter = diameter;
 }
 
@@ -30,13 +31,11 @@ void Motor::begin() {
              robotConfig::PWM_RESOLUTION);
   ledcAttach(backwardsPin, robotConfig::DRIVING_FREQUENCY,
              robotConfig::PWM_RESOLUTION);
-  // attachInterrupt(digitalPinToInterrupt(encoderPin1), count, RISING);
-  // attachInterrupt(digitalPinToInterrupt(encoderPin2), count, RISING);
   ledcWrite(forwardPin, 0);
   ledcWrite(backwardsPin, 0);
+  enableEncoder();
 }
 void Motor::enableEncoder() {
-  encoderEnabled = true;
   attachInterruptArg(
       digitalPinToInterrupt(encoderPin1),
       [](void *arg) IRAM_ATTR {
@@ -51,38 +50,45 @@ void Motor::enableEncoder() {
         motor->increaseCount();
       },
       this, RISING);
+  encoderEnabled = true;
 }
 
 void Motor::disableEncoder() {
-  encoderEnabled = false;
   detachInterrupt(digitalPinToInterrupt(encoderPin1));
   detachInterrupt(digitalPinToInterrupt(encoderPin2));
+  encoderEnabled = false;
 }
 void Motor::drive(float speed, int direction) {}
 
-void Motor::drive_distance(float distance, float speed) {}
+void Motor::driveDistance(float distance, float speed) {}
 
-float Motor::speed() {
-  bool wasEnabled = false;
-  if (!encoderEnabled) {
-    enableEncoder();
-    wasEnabled = true;
-  }
-  int initialTime = micros();
-  int initialCount = encoderCount;
-  int currentCount = 0;
-  int currentTime = 0;
-  while (micros() - initialTime < 50) {
-    currentCount = encoderCount;
-    currentTime = micros();
-  }
+/* Returns a float value corresponding to the average speed of the motor
+ * \param n The number of samples in the buffer to use in the speed calculation
+ * (n<10, n>0)
+ * \return -1.0 if the sample buffer is empty, or if n >10, n<0 the average
+ * speed otherwise.
+ *
+ *
+ */
 
-  if (wasEnabled) {
-    disableEncoder();
+float Motor::speed(int n) {
+  if (sampleBuffer.isEmpty() || n > 10 || n < 0 || sampleBuffer.size() < n) {
+    return -1.0f;
   }
 
-  return ((currentCount - initialCount) / (currentTime - initialTime)) *
-         wheelDiameter / robotConfig::PULSES_REV;
+  else {
+    return (PI * wheelDiameter / robotConfig::PULSES_REV) *
+           (n * robotConfig::DOWNSAMPLING_FACTOR) /
+           (sampleBuffer[n - 1] - sampleBuffer.first());
+  }
 }
 void Motor::increaseCount(int num) { encoderCount += 1; }
 void Motor::resetCount() { encoderCount = 0; }
+void Motor::handleInterrupt() {
+  if (sampleCount < robotConfig::DOWNSAMPLING_FACTOR) {
+    sampleCount++;
+  } else {
+    sampleBuffer.unshift(millis());
+  }
+  encoderCount++;
+}
