@@ -3,7 +3,7 @@
 #include "esp32-hal-ledc.h"
 #include "motor.h"
 #include <Arduino.h>
-#include <CircularBuffer.h>
+#include <CircularBuffer.hpp>
 // TODO:
 // PWM control
 // Proper implementation of counter (interrupt)
@@ -79,7 +79,7 @@ float Motor::speed(int n) {
   else {
     return (PI * wheelDiameter / robotConfig::PULSES_REV) *
            (n * robotConfig::DOWNSAMPLING_FACTOR) /
-           (sampleBuffer[n - 1] - sampleBuffer.first());
+           static_cast<float>(sampleBuffer[n - 1] - sampleBuffer.first());
   }
 }
 void Motor::increaseCount(int num) { encoderCount += 1; }
