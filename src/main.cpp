@@ -14,9 +14,8 @@ void setup() {
     motor1.begin();
 }
 
+
 void loop() {
-    motor1.one_turn();
-    delay(2000);
 
 }
 

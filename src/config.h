@@ -13,6 +13,7 @@ inline constexpr int MOTOR2_POLARITY = 1;
 inline constexpr float WHEEL_1_DIAMETER = 79; //(mm)
 inline constexpr float WHEEL_1_CIRCUMFERENCE = PI*WHEEL_1_DIAMETER;
 inline constexpr float WHEEL_1_SINGLE_PULSE = WHEEL_1_CIRCUMFERENCE / 1441; //(mm)
+inline constexpr int PULSES_REV = 1441;
 
 //Line Following Constants
 inline constexpr float LF_KD = 0.95; // derivative coefficient
