@@ -11,6 +11,7 @@ inline constexpr int DOWNSAMPLING_FACTOR = 10;
 inline constexpr int FORWARD = 1;
 inline constexpr int REVERSE = -1;
 inline constexpr int STOPPED = 0;
+inline constexpr int PWM_DELAY = 10; //delay between switching pins
 
 //Physical Constants 
 inline constexpr float WHEEL_1_DIAMETER = 79; //(mm)

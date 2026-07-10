@@ -6,7 +6,7 @@ struct Motor {
     int reversePin;
     int encoderPin1;
     int encoderPin2;
-    int encoderCount;
+    volatile int encoderCount;
     int sampleCount;
     float wheelDiameter;
     bool isOn = false;
