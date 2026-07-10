@@ -8,31 +8,33 @@
 // PWM control
 // Proper implementation of counter (interrupt)
 //
+
 Motor::Motor(int p1, int p2, int ePin1, int ePin2, float diameter,
              int polarity) {
   if (polarity == -1) { // swap the pins
     forwardPin = p2;
-    backwardsPin = p1;
+    reversePin = p1;
   }
 
   else {
     forwardPin = p1;
-    backwardsPin = p2;
+    reversePin = p2;
   }
   encoderPin1 = ePin1;
   encoderPin2 = ePin2;
   encoderCount = 0;
   sampleCount = 0;
   wheelDiameter = diameter;
+  motorState = Stopped;
 }
 
 void Motor::begin() {
   ledcAttach(forwardPin, robotConfig::DRIVING_FREQUENCY,
              robotConfig::PWM_RESOLUTION);
-  ledcAttach(backwardsPin, robotConfig::DRIVING_FREQUENCY,
+  ledcAttach(reversePin, robotConfig::DRIVING_FREQUENCY,
              robotConfig::PWM_RESOLUTION);
   ledcWrite(forwardPin, 0);
-  ledcWrite(backwardsPin, 0);
+  ledcWrite(reversePin, 0);
   enableEncoder();
 }
 void Motor::enableEncoder() {
@@ -58,9 +60,37 @@ void Motor::disableEncoder() {
   detachInterrupt(digitalPinToInterrupt(encoderPin2));
   encoderEnabled = false;
 }
-void Motor::drive(float speed, int direction) {}
+//TODO
+//implement this so it can be called WHILE the motor is still moving.
+void Motor::drive(int dutyCycle, int direction) {
+    if(motorState != Stopped) {
+	return;
+    }
+    switch(direction) {
+	case(robotConfig::FORWARD):
+		ledcWrite(forwardPin, dutyCycle);
+		break;
+	
+	case(robotConfig::REVERSE):
 
-void Motor::driveDistance(float distance, float speed) {}
+	    ledcWrite(reversePin, dutyCycle);
+	    break;
+
+	case(robotConfig::STOPPED):
+	    ledcWrite(forwardPin, 0);
+	    ledcWrite(reversePin, 0);
+	
+	default:
+	    ledcWrite(forwardPin, 0);
+	    ledcWrite(reversePin, 0);
+    }
+
+}
+
+void Motor::driveDistance(float distance, float speed) {
+
+
+}
 
 /* Returns a float value corresponding to the average speed of the motor
  * \param n The number of samples in the buffer to use in the speed calculation
@@ -82,7 +112,7 @@ float Motor::speed(int n) {
            static_cast<float>(sampleBuffer[n - 1] - sampleBuffer.first());
   }
 }
-void Motor::increaseCount(int num) { encoderCount += 1; }
+void Motor::increaseCount() { encoderCount += 1; }
 void Motor::resetCount() { encoderCount = 0; }
 void Motor::handleInterrupt() {
   if (sampleCount < robotConfig::DOWNSAMPLING_FACTOR) {
