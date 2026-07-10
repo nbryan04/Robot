@@ -11,7 +11,7 @@
 // Proper implementation of counter (interrupt)
 //
 
-Motor::Motor(int p1, int p2, int ePin1, int ePin2, float diameter,
+Motor::Motor(int p1, int p2, int ePin1, float diameter,
              int polarity) {
     if (polarity == -1) {  // swap the pins
         forwardPin = p2;
@@ -23,7 +23,6 @@ Motor::Motor(int p1, int p2, int ePin1, int ePin2, float diameter,
         reversePin = p2;
     }
     encoderPin1 = ePin1;
-    encoderPin2 = ePin2;
     encoderCount = 0;
     sampleCount = 0;
     wheelDiameter = diameter;
@@ -47,19 +46,11 @@ void Motor::enableEncoder() {
             motor->handleInterrupt();
         },
         this, RISING);
-    attachInterruptArg(
-        digitalPinToInterrupt(encoderPin2),
-        [](void* arg) IRAM_ATTR {
-            Motor* motor = static_cast<Motor*>(arg);
-            motor->handleInterrupt();
-        },
-        this, RISING);
     encoderEnabled = true;
 }
 
 void Motor::disableEncoder() {
     detachInterrupt(digitalPinToInterrupt(encoderPin1));
-    detachInterrupt(digitalPinToInterrupt(encoderPin2));
     encoderEnabled = false;
 }
 // TODO

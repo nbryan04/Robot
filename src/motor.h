@@ -5,7 +5,6 @@ struct Motor {
     int forwardPin;
     int reversePin;
     int encoderPin1;
-    int encoderPin2;
     volatile int encoderCount;
     int sampleCount;
     float wheelDiameter;
@@ -20,7 +19,7 @@ struct Motor {
        Stopped
    };
     CircularBuffer<int, 10> sampleBuffer;
-    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, int inputEncoderPin2, float diameter, int polarity = 1);
+    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, float diameter, int polarity = 1);
    //negative speed = backwards 
    void drive(int dutyCycle, Motor::MotorState direction);
    void driveDistance(float distance, float speed = 1.0f);
