@@ -34,20 +34,68 @@ void Claw::setAngle(int pin, int angle) {
     ledcWrite(pin, duty);
 }
 
-void Claw::grabRock() {
-    // 1. Move arm down
-    setAngle(apin, robotConfig::ARM_DOWN_ANGLE);
-    delay(800); // Give the heavy MG996R time to physically move
-    
-    // 2. Close the hand claw
-    setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);
-    delay(400); // Give the smaller MG90S time to grip the rock
-    
-    // 3. Move the arm back up
-    setAngle(apin, robotConfig::ARM_UP_ANGLE);
-    delay(800); // Lifting a rock takes effort, let it finish moving
-    
-    // 4. Reopen the hand
-    setAngle(hpin, robotConfig::HAND_OPEN_ANGLE);
-    delay(400); // Drop the rock!
+void Claw::startGrabSequence() {
+    if (currentState == IDLE) {
+        currentState = INIT_CLOSE;
+        stateStartTime = millis();
+        setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);
+    }
+}
+
+void Claw::update() {
+    if (currentState == IDLE) return;
+
+    unsigned long currentTime = millis();
+
+    switch (currentState) {
+        
+        case INIT_CLOSE:
+            if (currentTime - stateStartTime >= 400) {
+                setAngle(apin, robotConfig::ARM_DOWN_ANGLE + 45);
+                currentState = HOVERING;
+                stateStartTime = currentTime; 
+            }
+            break;
+
+        case HOVERING:
+            if (currentTime - stateStartTime >= 600) {
+                setAngle(hpin, robotConfig::HAND_OPEN_ANGLE);
+                currentState = OPENING;
+                stateStartTime = currentTime;
+            }
+            break;
+
+        case OPENING:
+            if (currentTime - stateStartTime >= 400) {
+                setAngle(apin, robotConfig::ARM_DOWN_ANGLE);
+                currentState = LOWERING;
+                stateStartTime = currentTime;
+            }
+            break;
+
+        case LOWERING:
+            if (currentTime - stateStartTime >= 400) {
+                setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);
+                currentState = GRABBING;
+                stateStartTime = currentTime;
+            }
+            break;
+
+        case GRABBING:
+            if (currentTime - stateStartTime >= 400) {
+                setAngle(apin, robotConfig::ARM_UP_ANGLE);
+                currentState = LIFTING;
+                stateStartTime = currentTime;
+            }
+            break;
+
+        case LIFTING:
+            if (currentTime - stateStartTime >= 800) {
+                currentState = IDLE;
+            }
+            break;
+            
+        case IDLE:
+            break;
+    }
 }
