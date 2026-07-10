@@ -64,7 +64,7 @@ void Motor::disableEncoder() {
 }
 // TODO
 // implement this so it can be called WHILE the motor is still moving.
-void Motor::drive(int dutyCycle, int direction) {
+void Motor::drive(int dutyCycle, MotorState direction) {
     switch (direction) {
         case (robotConfig::FORWARD):
             if (motorState == Reverse) {
@@ -122,7 +122,7 @@ float Motor::speed(int n) {
 }
 void Motor::increaseCount() { encoderCount += 1; }
 void Motor::resetCount() { encoderCount = 0; }
-void Motor::handleInterrupt() {
+void IRAM_ATTR Motor::handleInterrupt() {
     if (sampleCount < robotConfig::DOWNSAMPLING_FACTOR) {
         sampleCount++;
     } else {
