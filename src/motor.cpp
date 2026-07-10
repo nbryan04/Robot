@@ -117,7 +117,7 @@ float Motor::speed(int n) {
     else {
         return (PI * wheelDiameter / robotConfig::PULSES_REV) *
                (n * robotConfig::DOWNSAMPLING_FACTOR) /
-               static_cast<float>(sampleBuffer[n - 1] - sampleBuffer.first());
+               static_cast<float>(sampleBuffer.first() - sampleBuffer[n - 1]);
     }
 }
 void Motor::increaseCount() { encoderCount += 1; }
