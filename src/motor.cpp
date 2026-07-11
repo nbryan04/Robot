@@ -55,7 +55,7 @@ void Motor::disableEncoder() {
 }
 // TODO
 // implement this so it can be called WHILE the motor is still moving.
-void Motor::drive(int dutyCycle, MotorState direction) {
+void Motor::drive(int dutyCycle, int direction) {
     switch (direction) {
         case (robotConfig::FORWARD):
             if (motorState == Reverse) {

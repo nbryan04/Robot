@@ -21,7 +21,7 @@ struct Motor {
     CircularBuffer<int, 10> sampleBuffer;
     Motor(int input_pin1, int input_pin2, int inputEncoderPin1, float diameter, int polarity = 1);
    //negative speed = backwards 
-   void drive(int dutyCycle, Motor::MotorState direction);
+   void drive(int dutyCycle, int direction);
    void driveDistance(float distance, float speed = 1.0f);
    void one_turn(void);
    void begin();
