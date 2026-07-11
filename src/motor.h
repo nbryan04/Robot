@@ -1,4 +1,5 @@
 #include <Arduino.h>
+
 #include <CircularBuffer.hpp>
 #pragma once
 struct Motor {
@@ -13,25 +14,21 @@ struct Motor {
     float distance = 0.0f;
     float rotations = 0.0f;
     bool encoderEnabled = false;
-    enum MotorState {
-       Forward,
-       Reverse,
-       Stopped
-   };
+    enum MotorState { Forward, Reverse, Stopped };
     CircularBuffer<int, 10> sampleBuffer;
-    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, float diameter, int polarity = 1);
-   //negative speed = backwards 
-   void drive(int dutyCycle, int direction);
-   void driveDistance(float distance, float speed = 1.0f);
-   void one_turn(void);
-   void begin();
-   float speed(int n);
+    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, float diameter,
+          int polarity = 1);
+    // negative speed = backwards
+    void drive(int dutyCycle, int direction);
+    void driveDistance(float distance, float speed = 1.0f);
+    void one_turn(void);
+    void begin();
+    float speed(int n);
 
-   void increaseCount();
-   void resetCount();
-   void enableEncoder();
-   void disableEncoder();
-   void handleInterrupt();
-   MotorState motorState;
+    void increaseCount();
+    void resetCount();
+    void enableEncoder();
+    void disableEncoder();
+    void handleInterrupt();
+    MotorState motorState;
 };
-
