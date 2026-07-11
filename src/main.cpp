@@ -1,22 +1,42 @@
 #include "config.h"
 #include "motor.h"
+#include "claw.h"
 #include <Arduino.h>
 
-const int PWM_PIN1 = 3;
-const int PWM_PIN2 = 4;
-const int ENCODER_PIN1 = 5;
-const int ENCODER_PIN2 = 6;
-int PWM_FREQ = 2000; // Hz
-int PWM_RESOLUTION = 8;
+// Define the ESP32 pins connected to your servos
+const int HAND_SERVO_PIN = 47; 
+const int ARM_SERVO_PIN = 48;  
 
-Motor motor1(PWM_PIN1, PWM_PIN2,ENCODER_PIN1, ENCODER_PIN2, robotConfig::MOTOR1_POLARITY);
+Claw myClaw(HAND_SERVO_PIN, ARM_SERVO_PIN);
+
+// Timer variables to pause between grabs
+unsigned long lastActionTime = 0;
+const unsigned long PAUSE_BETWEEN_GRABS = 2000; // 2 seconds
+
 void setup() {
-    motor1.begin();
+    Serial.begin(115200);
+    myClaw.begin();
+    
+    Serial.println("Claw initialized. Starting continuous grab loop...");
 }
 
-
 void loop() {
+    // 1. You MUST call this every loop iteration to advance the state machine
+    myClaw.update();
 
+    // 2. Repeatedly trigger the grab sequence
+    if (myClaw.currentState == IDLE) {
+        
+        // Wait 2 seconds after finishing the last grab before starting the next
+        if (millis() - lastActionTime >= PAUSE_BETWEEN_GRABS) {
+            Serial.println("Grabbing!");
+            myClaw.startGrabSequence();
+        }
+        
+    } else {
+        // Keep resetting the timer as long as the claw is moving
+        lastActionTime = millis();
+    }
 }
 
 
