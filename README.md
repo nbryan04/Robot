@@ -1,8 +1,8 @@
 # Robot
 
 ## TODO:
-- PWM Control: Do not let other PWM pin turn on when the other is active
-- Mutable Variable (with methods to change it) that manages duty cycle WHILE motor running
+- ~~PWM Control: Do not let other PWM pin turn on when the other is active~~
+- ~~Mutable Variable (with methods to change it) that manages duty cycle WHILE motor running~~ (basically implemented with our new Motor.drive method)
 - Get encoding working to a high degree of accuracy
 - Turn functions (that take angle?)
 
