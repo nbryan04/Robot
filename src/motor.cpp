@@ -6,13 +6,8 @@
 #include "esp32-hal-gpio.h"
 #include "esp32-hal-ledc.h"
 #include "motor.h"
-// TODO:
-// PWM control
-// Proper implementation of counter (interrupt)
-//
 
-Motor::Motor(int p1, int p2, int ePin1, float diameter,
-             int polarity) {
+Motor::Motor(int p1, int p2, int ePin1, float diameter, int polarity) {
     if (polarity == -1) {  // swap the pins
         forwardPin = p2;
         reversePin = p1;
@@ -53,9 +48,7 @@ void Motor::disableEncoder() {
     detachInterrupt(digitalPinToInterrupt(encoderPin1));
     encoderEnabled = false;
 }
-// TODO
-// implement this so it can be called WHILE the motor is still moving.
-void Motor::drive(int dutyCycle, MotorState direction) {
+void Motor::drive(int dutyCycle, int direction) {
     switch (direction) {
         case (robotConfig::FORWARD):
             if (motorState == Reverse) {

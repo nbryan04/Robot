@@ -38,5 +38,3 @@ void loop() {
         lastActionTime = millis();
     }
 }
-
-
