@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include <CircularBuffer.hpp>
+#include <algorithm>
 
 #include "config.h"
 #include "esp32-hal-gpio.h"
@@ -25,6 +26,10 @@ Motor::Motor(int p1, int p2, int ePin1, float diameter, int polarity) {
 }
 
 void Motor::begin() {
+    pinMode(forwardPin, OUTPUT);
+    pinMode(reversePin, OUTPUT);
+    digitalWrite(forwardPin, LOW);
+    digitalWrite(reversePin, LOW);
     ledcAttach(forwardPin, robotConfig::DRIVING_FREQUENCY,
                robotConfig::PWM_RESOLUTION);
     ledcAttach(reversePin, robotConfig::DRIVING_FREQUENCY,
@@ -51,7 +56,7 @@ void Motor::disableEncoder() {
 void Motor::drive(int dutyCycle, int direction) {
     switch (direction) {
         case (robotConfig::FORWARD):
-            if (motorState == Reverse) {
+            if (motorState == Reverse || motorState == Stopped) {
                 ledcWrite(reversePin, 0);
                 delay(robotConfig::PWM_DELAY);
             }
@@ -60,7 +65,7 @@ void Motor::drive(int dutyCycle, int direction) {
             break;
 
         case (robotConfig::REVERSE):
-            if (motorState == Forward) {
+            if (motorState == Forward || motorState == Stopped) {
                 ledcWrite(forwardPin, 0);
                 delay(robotConfig::PWM_DELAY);
             }
