@@ -93,15 +93,15 @@ void Motor::driveDistance(float distance, float speed) {}
  *
  */
 
-float Motor::speed(int n) {
+double Motor::speed(int n) {
     if (sampleBuffer.isEmpty() || n > 10 || n < 0 || sampleBuffer.size() < n) {
-        return -1.0f;
+        return -1.0;
     }
 
     else {
         return (PI * wheelDiameter / robotConfig::PULSES_REV) *
                (n * robotConfig::DOWNSAMPLING_FACTOR) /
-               static_cast<float>(sampleBuffer.first() - sampleBuffer[n - 1]);
+               static_cast<double>(sampleBuffer.first() - sampleBuffer[n - 1]);
     }
 }
 void Motor::increaseCount() { encoderCount += 1; }
@@ -114,4 +114,14 @@ void IRAM_ATTR Motor::handleInterrupt() {
         sampleCount = 0;
     }
     increaseCount();
+}
+
+// test method
+void Motor::oneTurn(void) {
+    int count = encoderCount;
+    drive(500, robotConfig::FORWARD);
+    while (encoderCount  - count < robotConfig::PULSES_REV) {
+        delay(1);
+    }
+    drive(0, robotConfig::STOPPED);
 }

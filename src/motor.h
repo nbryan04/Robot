@@ -21,9 +21,9 @@ struct Motor {
     // negative speed = backwards
     void drive(int dutyCycle, int direction);
     void driveDistance(float distance, float speed = 1.0f);
-    void one_turn(void);
+    void oneTurn(void);
     void begin();
-    float speed(int n);
+    double speed(int n);
 
     void increaseCount();
     void resetCount();
