@@ -25,7 +25,7 @@ public:
     
     // Timer variables
     unsigned long lastPingTime = 0;
-    const unsigned long PING_INTERVAL = 3   0; 
+    const unsigned long PING_INTERVAL = 3; 
     
     // Volatile interrupt variables
     volatile unsigned long echoStart = 0;
