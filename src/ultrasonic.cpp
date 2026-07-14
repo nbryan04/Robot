@@ -3,45 +3,52 @@
 Ultrasonic::Ultrasonic(int trig, int echo) {
     this->trigPin = trig;
     this->echoPin = echo;
+    // Zero out the array on startup
+    for (int i = 0; i < FILTER_SIZE; i++) {
+        readings[i] = 0.0;
+    }
 }
 
 void Ultrasonic::begin() {
     pinMode(trigPin, OUTPUT);
     pinMode(echoPin, INPUT);
-    
-    // attachInterruptArg is an ESP32 feature that lets us pass 'this' (the current struct instance) 
-    // into the static interrupt handler so it knows which sensor triggered it.
     attachInterruptArg(digitalPinToInterrupt(echoPin), isrHandler, this, CHANGE);
 }
 
-// The ESP32 jumps here the microsecond the ECHO pin changes state.
-// We keep it ultra-short and fast.
 void IRAM_ATTR Ultrasonic::isrHandler(void* arg) {
-    // Cast the argument back into an Ultrasonic object and call its specific handler
     Ultrasonic* instance = static_cast<Ultrasonic*>(arg);
     instance->handleInterrupt();
 }
 
 void IRAM_ATTR Ultrasonic::handleInterrupt() {
     if (digitalRead(echoPin) == HIGH) {
-        // The pulse just started
         echoStart = micros();
     } else {
-        // The pulse just ended
         echoEnd = micros();
         newReading = true;
     }
 }
 
+// Fast insertion sort to find the median without disturbing the chronological buffer
+// Simple average of the circular buffer
+float Ultrasonic::calculateMean() {
+    float sum = 0.0;
+    
+    // Add up all the readings in the buffer
+    for (int i = 0; i < FILTER_SIZE; i++) {
+        sum += readings[i];
+    }
+    
+    // Divide by the number of readings to get the average
+    return sum / FILTER_SIZE;
+}
+
 void Ultrasonic::update() {
     unsigned long currentTime = millis();
     
-    // 1. Fire the trigger non-blockingly (once every PING_INTERVAL)
     if (currentTime - lastPingTime >= PING_INTERVAL) {
         lastPingTime = currentTime;
         
-        // The 10 microsecond delay is so infinitesimally small (0.01 ms) 
-        // that it doesn't violate our non-blocking rule for the main loop.
         digitalWrite(trigPin, LOW);
         delayMicroseconds(2);
         digitalWrite(trigPin, HIGH);
@@ -49,20 +56,35 @@ void Ultrasonic::update() {
         digitalWrite(trigPin, LOW);
     }
     
-    // 2. If the interrupt caught an echo, calculate the distance
     if (newReading) {
-        // Briefly pause interrupts to safely copy the data without it changing mid-copy
         noInterrupts();
         unsigned long duration = echoEnd - echoStart;
         newReading = false;
         interrupts();
         
-        // Speed of sound is ~0.0343 cm/microsecond. Divide by 2 because the sound goes out and back.
-        float calculatedDistance = (duration * 0.0343) / 2.0;
-        
-        // Basic sanity check to filter out glitchy 0 or extreme readings
+        float rawDistance = (duration * 0.0343) / 2.0;
+
+        float calculatedDistance = (rawDistance * SCALE_MULTIPLIER) + BASE_OFFSET;
+
         if (calculatedDistance > 0 && calculatedDistance < 400) { 
             currentDistanceCm = calculatedDistance;
+            
+            // 1. Push the new reading into the circular buffer
+            readings[readIndex] = currentDistanceCm;
+            readIndex++;
+            
+            // 2. If we hit the end of the array, loop back to the start
+            if (readIndex >= FILTER_SIZE) {
+                readIndex = 0;
+                bufferFull = true; 
+            }
+            
+            // 3. Update the filtered output (fallback to raw if buffer is still filling)
+            if (bufferFull) {
+                filteredDistanceCm = calculateMean(); // <-- Changed this
+            } else {
+                filteredDistanceCm = currentDistanceCm;
+            }
         }
     }
 }

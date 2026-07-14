@@ -1,21 +1,33 @@
 #pragma once
 #include <Arduino.h>
 
+ // Use an odd number for a true median
+
 struct Ultrasonic {
 public:
-    // Constructor
     Ultrasonic(int trig, int echo);
     
-    // All variables exposed out in the open!
     int trigPin;
     int echoPin;
-    float currentDistanceCm = -1.0; // -1 means no valid reading yet
     
-    // Timer variables for the non-blocking trigger
+    // Distance variables
+    float currentDistanceCm = -1.0;    // The raw, jumpy reading
+    float filteredDistanceCm = -1.0;   // The rock-solid median reading
+    
+    // Circular buffer for the median filter
+    static constexpr int FILTER_SIZE = 5; 
+    float readings[FILTER_SIZE];
+    int readIndex = 0;
+    bool bufferFull = false;
+    const float SCALE_MULTIPLIER = 0.97;; // Adjusts the proportional spread
+    const float BASE_OFFSET = -0.47;
+    
+    
+    // Timer variables
     unsigned long lastPingTime = 0;
-    const unsigned long PING_INTERVAL = 50; // Fire a sound pulse every 50ms
+    const unsigned long PING_INTERVAL = 3   0; 
     
-    // Volatile variables are required because the interrupt changes them in the background
+    // Volatile interrupt variables
     volatile unsigned long echoStart = 0;
     volatile unsigned long echoEnd = 0;
     volatile bool newReading = false;
@@ -23,10 +35,9 @@ public:
     // Core methods
     void begin();
     void update();
+    float calculateMean();
     
-    // Static ISR (Interrupt Service Routine) wrapper required for classes/structs
+    // Interrupt handlers
     static void IRAM_ATTR isrHandler(void* arg);
-    
-    // The actual interrupt logic for this specific sensor instance
     void handleInterrupt();
 };
