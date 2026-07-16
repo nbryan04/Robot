@@ -7,7 +7,11 @@
 #include "esp32-hal-ledc.h"
 #include "motor.h"
 
-Motor::Motor(int p1, int p2, int ePin1, int ePin2, float diameter, int polarity) {
+Motor::Motor(int p1, int p2, int ePin1, int ePin2, float diameter, int polarity,
+             std::function<int(float)> speedToDutyCallback) {
+    
+    mapSpeedToDutyCycle = speedToDutyCallback;
+    
     if (polarity == -1) {  // swap the pins
         forwardPin = p2;
         reversePin = p1;
@@ -198,9 +202,4 @@ void Motor::oneTurn(void) {
     }
     
     drive(0, robotConfig::STOPPED);
-}
-
-int Motor::mapSpeedToDutyCycle(float speed) {
-    // TODO: Implement empirical mapping from physical speed to required PWM duty cycle
-    return 0;
 }

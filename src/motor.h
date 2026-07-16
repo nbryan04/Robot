@@ -2,6 +2,7 @@
 #include <CircularBuffer.hpp>
 #include <ESP32Encoder.h>
 #include "config.h"
+#include <functional>
 
 #pragma once
 struct Motor {
@@ -9,6 +10,7 @@ struct Motor {
     int reversePin;
     int encoderPin1;
     int encoderPin2;
+    std::function<int(float)> mapSpeedToDutyCycle;
 
     int circumference = PI * robotConfig::WHEEL_1_DIAMETER;
 
@@ -25,7 +27,8 @@ struct Motor {
 
     enum MotorState { Forward, Reverse, Stopped };
     ESP32Encoder encoder;
-    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, int inputEncoderPin2, float diameter, int polarity);
+    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, int inputEncoderPin2, float diameter, int polarity,
+          std::function<int(float)> speedToDutyCallback);
     // negative speed = backwards
     void drive(int dutyCycle, int direction);
     void driveDistance(float distance, float speed = 1.0f);
