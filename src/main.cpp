@@ -1,40 +1,47 @@
 #include "config.h"
 #include "motor.h"
 #include "claw.h"
+#include "ultrasonic.h"
 #include <Arduino.h>
 
-// Define the ESP32 pins connected to your servos
-const int HAND_SERVO_PIN = 47; 
-const int ARM_SERVO_PIN = 48;  
+Ultrasonic mySensor(8, 7); 
 
-Claw myClaw(HAND_SERVO_PIN, ARM_SERVO_PIN);
-
-// Timer variables to pause between grabs
-unsigned long lastActionTime = 0;
-const unsigned long PAUSE_BETWEEN_GRABS = 2000; // 2 seconds
+unsigned long lastPrintTime = 0;
+const unsigned long PRINT_INTERVAL = 500; 
 
 void setup() {
     Serial.begin(115200);
-    myClaw.begin();
-    
-    Serial.println("Claw initialized. Starting continuous grab loop...");
+    mySensor.begin();
+    Serial.println("Starting filtered ultrasonic test with edge detection...");
 }
 
 void loop() {
-    // 1. You MUST call this every loop iteration to advance the state machine
-    myClaw.update();
+    // 1. Keep the background buffer running (Non-blocking)
+    mySensor.update();
 
-    // 2. Repeatedly trigger the grab sequence
-    if (myClaw.currentState == IDLE) {
+    // 2. Ask the sensor if an edge was triggered this exact loop
+    EdgeEvent currentEvent = mySensor.checkEdgeEvents();
+
+    // 3. React to the edge events INSTANTLY
+    if (currentEvent == START_EDGE) {
+        Serial.print("\n>>> START EDGE FOUND! Triggered at: ");
+        Serial.print(mySensor.filteredDistanceCm);
+        Serial.println(" cm <<<");
+    } 
+    else if (currentEvent == END_EDGE) {
+        Serial.println(">>> END EDGE FOUND! Object cleared. <<<\n");
+    }
+
+    // 4. Print the live distance at your 500ms interval
+    if (millis() - lastPrintTime >= PRINT_INTERVAL) {
+        lastPrintTime = millis();
         
-        // Wait 2 seconds after finishing the last grab before starting the next
-        if (millis() - lastActionTime >= PAUSE_BETWEEN_GRABS) {
-            Serial.println("Grabbing!");
-            myClaw.startGrabSequence();
+        if (mySensor.filteredDistanceCm > 0) {
+            Serial.print("Raw: ");
+            Serial.print(mySensor.currentDistanceCm);
+            Serial.print(" cm  |  Filtered: ");
+            Serial.print(mySensor.filteredDistanceCm);
+            Serial.println(" cm");
         }
-        
-    } else {
-        // Keep resetting the timer as long as the claw is moving
-        lastActionTime = millis();
     }
 }
