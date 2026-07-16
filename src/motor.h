@@ -15,6 +15,13 @@ struct Motor {
     int lastSpeedTime = 0;
     int lastEncoderCount = 0;
     double currentSpeed = 0.0;
+    
+    enum MovementState { Idle, Driving, Braking };
+    MovementState movementState = Idle;
+    long targetEncoderCount = 0;
+    long brakeTargetCount = 0;
+    int currentDriveDirection = robotConfig::STOPPED;
+    void update();
 
     enum MotorState { Forward, Reverse, Stopped };
     ESP32Encoder encoder;
@@ -26,5 +33,6 @@ struct Motor {
     void begin();
     double speed();
     void enableQuadratureEncoder();
+    int mapSpeedToDutyCycle(float speed);
     MotorState motorState;
 };
