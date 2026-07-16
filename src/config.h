@@ -25,4 +25,9 @@ inline constexpr float LF_KD = 0.95;       // derivative coefficient
 inline constexpr float LF_KP = 0.8;        // proportional coefficient
 inline constexpr int LF_THRESHOLD = 1500;  // tape sensing
 
+//Claw constants  
+inline constexpr int ARM_UP_ANGLE = 160;
+inline constexpr int ARM_DOWN_ANGLE = 0;
+inline constexpr int HAND_CLOSE_ANGLE = 3;
+inline constexpr int HAND_OPEN_ANGLE = 69;
 }
