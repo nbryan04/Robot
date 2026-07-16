@@ -36,6 +36,5 @@ struct Motor {
     void begin();
     double speed();
     void enableQuadratureEncoder();
-    int mapSpeedToDutyCycle(float speed);
     MotorState motorState;
 };
