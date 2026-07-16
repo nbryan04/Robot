@@ -1,22 +1,22 @@
 #pragma once
 #include <Arduino.h>
 
-// What is the sensor currently doing? (Internal memory)
-enum EdgeState {
-    WAITING_FOR_OBJECT,
-    TRACKING_OBJECT
-};
-
-// What just happened this exact millisecond? (External report)
-enum EdgeEvent {
-    NONE,
-    START_EDGE,
-    END_EDGE
-};
-
 struct Ultrasonic {
 public:
     Ultrasonic(int trig, int echo);
+
+    // What is the sensor currently doing? (Internal memory)
+    enum EdgeState {
+        WAITING_FOR_OBJECT,
+        TRACKING_OBJECT
+    };
+
+    // What just happened this exact millisecond? (External report)
+    enum EdgeEvent {
+        NONE,
+        START_EDGE,
+        END_EDGE
+    };
     
     static constexpr int FILTER_SIZE = 5; 
     static constexpr float SCALE_MULTIPLIER = 0.97;

@@ -100,7 +100,7 @@ void Ultrasonic::update() {
 }
 
 // Delta-based edge detection using the rolling history window
-EdgeEvent Ultrasonic::checkEdgeEvents() {
+Ultrasonic::EdgeEvent Ultrasonic::checkEdgeEvents() {
     if (!historyFull || !newEdgeDataReady) {
         return NONE;
     }
