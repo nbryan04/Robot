@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <CircularBuffer.hpp>
 #include <ESP32Encoder.h>
+#include "config.h"
 
 #pragma once
 struct Motor {

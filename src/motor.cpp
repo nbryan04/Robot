@@ -79,15 +79,8 @@ void Motor::drive(int dutyCycle, int direction) {
 
 void Motor::driveDistance(float distance, float speed) {}
 
-/* Returns a float value corresponding to the average speed of the motor
- * \param n The number of samples in the buffer to use in the speed calculation
- * (n<10, n>0)
- * \return -1.0 if the sample buffer is empty, or if n >10, n<0 the average
- * speed otherwise.
- *
- *
- */
 
+// returns motor speed in m/s
 double Motor::speed() {
     unsigned long currentTime = millis();
     unsigned long timeElapsed = currentTime - lastSpeedTime;
@@ -105,7 +98,7 @@ double Motor::speed() {
         double distance = revolutions * circumference;  // distance in mm
         
         // 3. Calculate velocity: v = d / t
-        double timeSeconds = timeElapsed / 1000.0;
+        double timeSeconds = timeElapsed;
         currentSpeed = distance / timeSeconds;
 
         // 4. Save current values for the next cycle
