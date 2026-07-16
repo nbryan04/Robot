@@ -1,34 +1,30 @@
 #include <Arduino.h>
-
 #include <CircularBuffer.hpp>
+#include <ESP32Encoder.h>
+#include "config.h"
+
 #pragma once
 struct Motor {
     int forwardPin;
     int reversePin;
     int encoderPin1;
-    volatile int encoderCount;
-    int sampleCount;
-    float wheelDiameter;
-    bool isOn = false;
-    bool isForward = true;
-    float distance = 0.0f;
-    float rotations = 0.0f;
-    bool encoderEnabled = false;
+    int encoderPin2;
+
+    int circumference = PI * robotConfig::WHEEL_1_DIAMETER;
+
+    int lastSpeedTime = 0;
+    int lastEncoderCount = 0;
+    double currentSpeed = 0.0;
+
     enum MotorState { Forward, Reverse, Stopped };
-    CircularBuffer<int, 10> sampleBuffer;
-    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, float diameter,
-          int polarity = 1);
+    ESP32Encoder encoder;
+    Motor(int input_pin1, int input_pin2, int inputEncoderPin1, int inputEncoderPin2, float diameter, int polarity);
     // negative speed = backwards
     void drive(int dutyCycle, int direction);
     void driveDistance(float distance, float speed = 1.0f);
-    void one_turn(void);
+    void oneTurn(void);
     void begin();
-    float speed(int n);
-
-    void increaseCount();
-    void resetCount();
-    void enableEncoder();
-    void disableEncoder();
-    void handleInterrupt();
+    double speed();
+    void enableQuadratureEncoder();
     MotorState motorState;
 };
