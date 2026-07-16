@@ -43,8 +43,18 @@ const int ENCODER_PIN2_LEFT = 2;
 int PWM_FREQ = 2000; // Hz
 int PWM_RESOLUTION = 10;
 
-Motor motorLeft(PWM_PIN_FORWARD_LEFT, PWM_PIN_REVERSE_LEFT, ENCODER_PIN1_LEFT, ENCODER_PIN2_LEFT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR1_POLARITY);
-Motor motorRight(PWM_PIN_FORWARD_RIGHT, PWM_PIN_REVERSE_RIGHT, ENCODER_PIN1_RIGHT, ENCODER_PIN2_RIGHT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR2_POLARITY);
+int leftSpeedToDuty(float speed) {
+    // Return the duty cycle needed for the left motor to hit this speed
+    return 0; 
+}
+
+int rightSpeedToDuty(float speed) {
+    // Return the duty cycle needed for the right motor to hit this speed
+    return 0; 
+}
+
+Motor motorLeft(PWM_PIN_FORWARD_LEFT, PWM_PIN_REVERSE_LEFT, ENCODER_PIN1_LEFT, ENCODER_PIN2_LEFT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR1_POLARITY, leftSpeedToDuty);
+Motor motorRight(PWM_PIN_FORWARD_RIGHT, PWM_PIN_REVERSE_RIGHT, ENCODER_PIN1_RIGHT, ENCODER_PIN2_RIGHT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR2_POLARITY, rightSpeedToDuty);
 void setup() {
     motorLeft.begin();
     motorRight.begin();
