@@ -12,13 +12,13 @@ inline constexpr int FORWARD = 1;
 inline constexpr int REVERSE = -1;
 inline constexpr int STOPPED = 0;
 inline constexpr int PWM_DELAY = 10;  // delay between switching pins
-
+inline constexpr int MAX_SPEED_SAMPLE_COOLDOWN = 20; // ms
 // Physical Constants
 inline constexpr float WHEEL_1_DIAMETER = 79;  //(mm)
 inline constexpr float WHEEL_1_CIRCUMFERENCE = PI * WHEEL_1_DIAMETER;
 inline constexpr float WHEEL_1_SINGLE_PULSE =
     WHEEL_1_CIRCUMFERENCE / 1441;  //(mm)
-inline constexpr int PULSES_REV = 1441;
+inline constexpr int PULSES_REV = 5764;
 
 // Line Following Constants
 inline constexpr float LF_KD = 0.95;       // derivative coefficient
