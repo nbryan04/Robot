@@ -70,6 +70,7 @@ void Motor::drive(int dutyCycle, int direction) {
         case (robotConfig::STOPPED):
             ledcWrite(forwardPin, 0);
             ledcWrite(reversePin, 0);
+            delay(robotConfig::PWM_DELAY);
             motorState = Stopped;
             break;
 
