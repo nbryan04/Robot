@@ -50,7 +50,7 @@ void Motor::enableQuadratureEncoder() {
 void Motor::drive(int dutyCycle, int direction) {
     switch (direction) {
         case (robotConfig::FORWARD):
-            if (motorState == Reverse || motorState = Stopped) {
+            if (motorState == Reverse || motorState == Stopped) {
                 ledcWrite(reversePin, 0);
                 delay(robotConfig::PWM_DELAY);
             }
