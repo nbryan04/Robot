@@ -1,5 +1,6 @@
 #include "config.h"
 #include "motor.h"
+#include "drive_train.h"
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -11,27 +12,27 @@
 #define I2C_SDA 6
 #define I2C_SCL 5
 
-
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display_handler(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 void OledSetup(){
-    bool success = Wire.begin(I2C_SDA, I2C_SCL); // sets the I2C pins to the specified values
+    bool success = Wire.begin(I2C_SDA, I2C_SCL); 
 
-  display_handler.begin(SSD1306_SWITCHCAPVCC, 0x3C); // Displays Adafruit logo by default. call clearDisplay immediately if you don't want this.
-  display_handler.display();
-  delay(2000);
+    // Displays Adafruit logo by default
+    display_handler.begin(SSD1306_SWITCHCAPVCC, 0x3C); 
+    display_handler.display();
+    delay(2000);
  
-  display_handler.clearDisplay();
-  display_handler.setTextSize(1);
-  display_handler.setTextColor(SSD1306_WHITE);
-  display_handler.setCursor(0,0); // set the cursor start location
-  display_handler.println("Hello World");// Displays "Hello world!" on the screen
-  display_handler.display();
+    display_handler.clearDisplay();
+    display_handler.setTextSize(1);
+    display_handler.setTextColor(SSD1306_WHITE);
+    display_handler.setCursor(0,0);
+    display_handler.println("System Ready");
+    display_handler.display();
 }
 
-
+// Pin Definitions
 const int PWM_PIN_FORWARD_LEFT = 11;
 const int PWM_PIN_REVERSE_LEFT = 10;
 const int PWM_PIN_FORWARD_RIGHT = 12;
@@ -43,37 +44,61 @@ const int ENCODER_PIN2_LEFT = 2;
 int PWM_FREQ = 2000; // Hz
 int PWM_RESOLUTION = 10;
 
-int leftSpeedToDuty(float speed) {
-    // Return the duty cycle needed for the left motor to hit this speed
-    return 0; 
-}
+// Motor and Drivetrain Instantiation
+Motor motorLeft(PWM_PIN_FORWARD_LEFT, PWM_PIN_REVERSE_LEFT, ENCODER_PIN1_LEFT, ENCODER_PIN2_LEFT, 
+                robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR1_POLARITY, robotConfig::leftSpeedToDuty);
+                
+Motor motorRight(PWM_PIN_FORWARD_RIGHT, PWM_PIN_REVERSE_RIGHT, ENCODER_PIN1_RIGHT, ENCODER_PIN2_RIGHT, 
+                 robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR2_POLARITY, robotConfig::rightSpeedToDuty);
 
-int rightSpeedToDuty(float speed) {
-    // Return the duty cycle needed for the right motor to hit this speed
-    return 0; 
-}
+Drivetrain chassis(motorLeft, motorRight);
 
-Motor motorLeft(PWM_PIN_FORWARD_LEFT, PWM_PIN_REVERSE_LEFT, ENCODER_PIN1_LEFT, ENCODER_PIN2_LEFT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR1_POLARITY, leftSpeedToDuty);
-Motor motorRight(PWM_PIN_FORWARD_RIGHT, PWM_PIN_REVERSE_RIGHT, ENCODER_PIN1_RIGHT, ENCODER_PIN2_RIGHT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR2_POLARITY, rightSpeedToDuty);
+// Timer for non-blocking OLED updates
+unsigned long lastDisplayTime = 0;
+
 void setup() {
+    Serial.begin(115200);
+    
     motorLeft.begin();
     motorRight.begin();
     OledSetup();
-}
+    
+    delay(1000); // Brief pause before starting
 
+    // Command the robot to drive 1000mm forward at 0.2 m/s
+    chassis.driveStraight(1000.0, 0.2); 
+}
 
 void loop() {
-    motorLeft.drive(500, robotConfig::FORWARD);
-    motorRight.drive(500, robotConfig::FORWARD);
-    display_handler.clearDisplay();
-  display_handler.setTextSize(1);
-  display_handler.setTextColor(SSD1306_WHITE);
-  display_handler.setCursor(0,0); // set the cursor start location
-  display_handler.print("Left: ");
-  display_handler.print(motorLeft.speed());
-  display_handler.print("   Right: ");
-  display_handler.print(motorRight.speed());
-  display_handler.display();
-  delay(100);
-}
+    // 1. Run the high-speed control loop continuously
+    chassis.update();
 
+    // 2. Non-blocking OLED update every 100ms (10Hz)
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastDisplayTime >= 100) {
+        lastDisplayTime = currentMillis;
+        
+        display_handler.clearDisplay();
+        display_handler.setTextSize(1);
+        display_handler.setTextColor(SSD1306_WHITE);
+        display_handler.setCursor(0,0);
+        
+        // Print Current State (0=Idle, 1=Driving, 2=Turning, 3=Braking)
+        display_handler.print("State: ");
+        display_handler.println(chassis.state);
+        
+        // Print Live Speeds
+        display_handler.print("L Spd: ");
+        display_handler.println(motorLeft.speed(), 3); 
+        display_handler.print("R Spd: ");
+        display_handler.println(motorRight.speed(), 3);
+        
+        // Print Current Encoder Ticks for debugging targets
+        display_handler.print("L Ticks: ");
+        display_handler.println(motorLeft.encoder.getCount());
+        display_handler.print("R Ticks: ");
+        display_handler.println(motorRight.encoder.getCount());
+        
+        display_handler.display();
+    }
+}
