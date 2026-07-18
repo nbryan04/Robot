@@ -19,7 +19,6 @@ void Drivetrain::driveStraight(float distanceMM, float speed) {
     leftTargetEncoder = leftStartEncoder + ticksToMove;
     rightTargetEncoder = rightStartEncoder + ticksToMove;
 
-    // Both wheels go the same way
     leftDriveDirection = (distanceMM >= 0) ? robotConfig::FORWARD : robotConfig::REVERSE;
     rightDriveDirection = leftDriveDirection;
     
@@ -32,31 +31,24 @@ void Drivetrain::driveStraight(float distanceMM, float speed) {
 }
 
 void Drivetrain::turn(float degrees, float speed) {
-    // 1. Calculate the distance each wheel must travel along the turning circle
-    float trackWidth = 202.5; // (mm) Consider moving this to robotConfig in config.h!
+    float trackWidth = 202.5; // (mm) 
     float turningCircumference = PI * trackWidth;
     
-    // Distance = Full Circumference * (Requested Degrees / 360 Degrees)
     float distanceMM = turningCircumference * (abs(degrees) / 360.0f);
 
-    // 2. Convert that physical distance into encoder ticks
     float revolutions = distanceMM / robotConfig::WHEEL_1_CIRCUMFERENCE;
     long ticksToMove = revolutions * robotConfig::PULSES_REV;
 
-    // 3. Record starting positions
     leftStartEncoder = leftMotor.encoder.getCount();
     rightStartEncoder = rightMotor.encoder.getCount();
 
-    // 4. Assign directions and targets based on turn direction
-    // Assuming positive degrees = Clockwise Turn (Left goes forward, Right goes reverse)
-    if (degrees >= 0) {
+    if (degrees >= 0) { // Clockwise
         leftDriveDirection = robotConfig::FORWARD;
         rightDriveDirection = robotConfig::REVERSE;
         
         leftTargetEncoder = leftStartEncoder + ticksToMove;
         rightTargetEncoder = rightStartEncoder - ticksToMove;
-    } else {
-        // Negative degrees = Counter-Clockwise Turn
+    } else { // Counter-Clockwise
         leftDriveDirection = robotConfig::REVERSE;
         rightDriveDirection = robotConfig::FORWARD;
         
@@ -64,7 +56,6 @@ void Drivetrain::turn(float degrees, float speed) {
         rightTargetEncoder = rightStartEncoder + ticksToMove;
     }
 
-    // 5. Kick off the movement
     targetSpeed = abs(speed);
 
     leftMotor.drive(leftMotor.mapSpeedToDutyCycle(targetSpeed), leftDriveDirection);
@@ -80,12 +71,33 @@ void Drivetrain::update() {
     long rightCurrent = rightMotor.encoder.getCount();
 
     // ---------------------------------------------------------
-    // STATE 1: Actively Driving or Turning (with PD Sync)
+    // STATE 1: Driving Straight OR Turning (Unified Dynamic Ramp)
     // ---------------------------------------------------------
     if (state == DrivingStraight || state == Turning) {
         
-        int leftBasePWM = leftMotor.mapSpeedToDutyCycle(targetSpeed);
-        int rightBasePWM = rightMotor.mapSpeedToDutyCycle(targetSpeed);
+        long remainingTicks = abs(leftTargetEncoder - leftCurrent);
+        float activeTargetSpeed = targetSpeed;
+        
+        // --- THE FIX ---
+        // 1. Calculate the total size of the current move
+        long totalMoveTicks = abs(leftTargetEncoder - leftStartEncoder);
+        
+        // 2. The slowdown zone is half a wheel rotation, OR half the total move, 
+        // whichever is smaller. This prevents short turns from braking instantly.
+        long maxSlowdown = robotConfig::PULSES_REV / 2;
+        long slowdownZone = min(maxSlowdown, (totalMoveTicks / 2)); 
+
+        if (remainingTicks < slowdownZone) {
+            // 3. Give turning a higher minimum speed to overcome sideways scrubbing friction
+            float minSafeSpeed = (state == Turning) ? 0.12f : 0.08f; 
+            
+            float progress = (float)remainingTicks / slowdownZone; 
+            activeTargetSpeed = minSafeSpeed + ((targetSpeed - minSafeSpeed) * progress);
+        }
+        // ---------------
+
+        int leftBasePWM = leftMotor.mapSpeedToDutyCycle(activeTargetSpeed);
+        int rightBasePWM = rightMotor.mapSpeedToDutyCycle(activeTargetSpeed);
 
         long leftDistanceMoved = abs(leftCurrent - leftStartEncoder);
         long rightDistanceMoved = abs(rightCurrent - rightStartEncoder);
@@ -103,64 +115,47 @@ void Drivetrain::update() {
         leftMotor.drive(leftFinalPWM, leftDriveDirection);
         rightMotor.drive(rightFinalPWM, rightDriveDirection);
 
-        // Check if we hit targets based on each wheel's independent direction
         bool leftDone = (leftDriveDirection == robotConfig::FORWARD) ? (leftCurrent >= leftTargetEncoder) : (leftCurrent <= leftTargetEncoder);
         bool rightDone = (rightDriveDirection == robotConfig::FORWARD) ? (rightCurrent >= rightTargetEncoder) : (rightCurrent <= rightTargetEncoder);
 
-        // If EITHER wheel finishes, cut power to both immediately to prevent spinning, then correct overshoot
         if (leftDone || rightDone) {
             leftMotor.drive(0, robotConfig::STOPPED);
             rightMotor.drive(0, robotConfig::STOPPED);
-            
-            // Move to Braking phase to calculate and correct the overshoot
             state = Braking;
         }
     }
     
     // ---------------------------------------------------------
-    // STATE 2: One-Time Overshoot Correction
+    // STATE 2: Gentle Overshoot Correction (No PD Sync)
     // ---------------------------------------------------------
     else if (state == Braking) {
-        // Calculate exactly how many ticks each wheel overshot by
         long leftOvershoot = leftCurrent - leftTargetEncoder;
         long rightOvershoot = rightCurrent - rightTargetEncoder;
 
-        bool leftNeedsCorrection = abs(leftOvershoot) > 2;
-        bool rightNeedsCorrection = abs(rightOvershoot) > 2;
+        int deadband = 10; // Ticks of acceptable error tolerance
+        
+        bool leftNeedsCorrection = abs(leftOvershoot) > deadband;
+        bool rightNeedsCorrection = abs(rightOvershoot) > deadband;
 
         if (leftNeedsCorrection || rightNeedsCorrection) {
+            int nudgePWM = 350; 
             
-            // Run correction at a very low, safe speed
-            int leftCorrectionDuty = leftMotor.mapSpeedToDutyCycle(0.05f);
-            int rightCorrectionDuty = rightMotor.mapSpeedToDutyCycle(0.05f);
-            
-            // Apply correction to left wheel if needed
             if (leftNeedsCorrection) {
-                // If overshoot is positive, we need to go reverse. If negative, go forward.
                 leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
-                leftMotor.drive(leftCorrectionDuty, leftDriveDirection);
+                leftMotor.drive(nudgePWM, leftDriveDirection);
             } else {
                 leftMotor.drive(0, robotConfig::STOPPED);
             }
 
-            // Apply correction to right wheel if needed
             if (rightNeedsCorrection) {
                 rightDriveDirection = (rightOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
-                rightMotor.drive(rightCorrectionDuty, rightDriveDirection);
+                // Applying your 1.07 hardware compensation multiplier directly to the nudge torque
+                rightMotor.drive((int)(nudgePWM * 1.07f), rightDriveDirection);
             } else {
                 rightMotor.drive(0, robotConfig::STOPPED);
             }
             
-            // Reset start encoders so the PD sync loop doesn't freak out during the tiny correction push
-            leftStartEncoder = leftCurrent;
-            rightStartEncoder = rightCurrent;
-            targetSpeed = 0.05f; 
-            
-            // Loop back to Driving state to finish these last few correction ticks cleanly using the same target
-            state = DrivingStraight; 
-            
         } else {
-            // If both wheels are within the 2-tick tolerance buffer, we are perfectly on target!
             leftMotor.drive(0, robotConfig::STOPPED);
             rightMotor.drive(0, robotConfig::STOPPED);
             state = Idle;

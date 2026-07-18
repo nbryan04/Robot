@@ -66,7 +66,7 @@ void setup() {
     delay(1000); // Brief pause before starting
 
     // Command the robot to drive 1000mm forward at 0.2 m/s
-    chassis.driveStraight(1000.0, 0.2); 
+    chassis.turn(90, 0.2); // Turn 90 degrees at 0.2 m/s
 }
 
 void loop() {

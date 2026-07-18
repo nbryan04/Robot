@@ -36,7 +36,28 @@ inline constexpr int IR_ADC_PIN    = -1;  // analog input; must be an ADC1 pin (
 inline constexpr int IR_SELECT_PIN = -1;  // HIGH = search 1kHz, LOW = search 10kHz
 
 // Define mapping for the LEFT motor
-int leftSpeedToDuty(float speed);
-int rightSpeedToDuty(float speed);
+// Define mapping for the LEFT motor
+inline int leftSpeedToDuty(float speed) {
+    // Safety check to allow the motor to fully stop
+    if (speed <= 0.01f) return 0; 
+    
+    // Derived from your linear region (PWM 400 to 600)
+    int calculatedPWM = (1311.5 * speed) + 342;
+    
+    // Cap it at max duty just to be safe
+    return constrain(calculatedPWM, 0, robotConfig::MAX_DUTY);
+}
 
+// Define mapping for the RIGHT motor
+inline int rightSpeedToDuty(float speed) {
+    if (speed <= 0.01f) return 0;
+    
+    // Applying the 1.07x multiplier for the right side
+    // Slope: 1311.5 * 1.07 = 1403.3
+    // Intercept: 342 * 1.07 = ~366
+    int calculatedPWM = (1403.3 * speed) + 366;
+    
+    return constrain(calculatedPWM, 0, robotConfig::MAX_DUTY);
+
+}
 }
