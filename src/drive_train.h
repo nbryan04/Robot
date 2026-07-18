@@ -1,9 +1,42 @@
 #pragma once
+#include <Arduino.h>
 #include "motor.h"
-struct drive_train {
-  drive_train(Motor motor1, Motor motor2);
+#include "config.h"
 
-  void turn(float angle); // int method?
-  void drive(float distance, float speed); //set a default speed
-  void line_follow(float distance, float speed);
+struct Drivetrain {
+    Motor& leftMotor;
+    Motor& rightMotor;
+
+    enum DriveState { Idle, DrivingStraight, Turning, Braking };
+    DriveState state = Idle;
+
+    // Encoder targeting
+    long leftTargetEncoder = 0;
+    long rightTargetEncoder = 0;
+    long leftBrakeTarget = 0;
+    long rightBrakeTarget = 0;
+    
+    // Initial encoder counts when a move starts
+    long leftStartEncoder = 0;
+    long rightStartEncoder = 0;
+
+    // Independent direction tracking
+    int leftDriveDirection = robotConfig::STOPPED;
+    int rightDriveDirection = robotConfig::STOPPED;
+    int leftBrakeDirection = robotConfig::STOPPED;
+    int rightBrakeDirection = robotConfig::STOPPED;
+    
+    float targetSpeed = 0.0;
+
+    // Tuning constants
+    float Kp_sync = .1; 
+    float Kv_sync = 2500; 
+    int brakeTicks = 20; // Number of ticks to reverse for active braking
+
+    Drivetrain(Motor& left, Motor& right);
+
+    void driveStraight(float distanceMM, float speed);
+    void turn(float degrees, float speed);
+    void stop();
+    void update(); 
 };
