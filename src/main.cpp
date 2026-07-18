@@ -5,6 +5,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <ESP32Encoder.h>
+#include "claw.h"
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -31,6 +32,9 @@ void OledSetup(){
   display_handler.display();
 }
 
+const int METAL_DETECTOR_PIN = 17;
+const int CLAW_PIN = 16;
+const int ARM_PIN = 15;
 
 const int PWM_PIN_FORWARD_LEFT = 11;
 const int PWM_PIN_REVERSE_LEFT = 10;
@@ -44,36 +48,30 @@ int PWM_FREQ = 2000; // Hz
 int PWM_RESOLUTION = 10;
 
 int leftSpeedToDuty(float speed) {
-    // Return the duty cycle needed for the left motor to hit this speed
-    return 0; 
+    int dutyCycle = 5665 * std::pow(speed, 2) - 542 * speed + 480;
+    return std::max(0, std::min(dutyCycle, 1023)); // Ensure duty cycle is within 0-1023 range
 }
 
 int rightSpeedToDuty(float speed) {
-    // Return the duty cycle needed for the right motor to hit this speed
-    return 0; 
+    int dutyCycle = 7616 * std::pow(speed, 2) - 1016 * speed + 525;
+    return std::max(0, std::min(dutyCycle, 1023)); // Ensure duty cycle is within 0-1023 range
 }
 
 Motor motorLeft(PWM_PIN_FORWARD_LEFT, PWM_PIN_REVERSE_LEFT, ENCODER_PIN1_LEFT, ENCODER_PIN2_LEFT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR1_POLARITY, leftSpeedToDuty);
 Motor motorRight(PWM_PIN_FORWARD_RIGHT, PWM_PIN_REVERSE_RIGHT, ENCODER_PIN1_RIGHT, ENCODER_PIN2_RIGHT, robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR2_POLARITY, rightSpeedToDuty);
+Claw claw(CLAW_PIN, ARM_PIN);
 void setup() {
     motorLeft.begin();
     motorRight.begin();
+    claw.begin();
     OledSetup();
 }
 
 
 void loop() {
-    motorLeft.drive(500, robotConfig::FORWARD);
-    motorRight.drive(500, robotConfig::FORWARD);
-    display_handler.clearDisplay();
-  display_handler.setTextSize(1);
-  display_handler.setTextColor(SSD1306_WHITE);
-  display_handler.setCursor(0,0); // set the cursor start location
-  display_handler.print("Left: ");
-  display_handler.print(motorLeft.speed());
-  display_handler.print("   Right: ");
-  display_handler.print(motorRight.speed());
-  display_handler.display();
-  delay(100);
+    claw.setAngle(ARM_PIN, robotConfig::ARM_DOWN_ANGLE);
+    delay(1000);
+    claw.setAngle(ARM_PIN, 45);
+    delay(1000);
 }
 
