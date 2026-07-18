@@ -79,7 +79,9 @@ void Drivetrain::update() {
     long leftCurrent = leftMotor.encoder.getCount();
     long rightCurrent = rightMotor.encoder.getCount();
 
-    // Both Driving and Turning use the same sync logic, just evaluating their specific targets
+    // ---------------------------------------------------------
+    // STATE 1: Actively Driving or Turning (with PD Sync)
+    // ---------------------------------------------------------
     if (state == DrivingStraight || state == Turning) {
         
         int leftBasePWM = leftMotor.mapSpeedToDutyCycle(targetSpeed);
@@ -105,32 +107,63 @@ void Drivetrain::update() {
         bool leftDone = (leftDriveDirection == robotConfig::FORWARD) ? (leftCurrent >= leftTargetEncoder) : (leftCurrent <= leftTargetEncoder);
         bool rightDone = (rightDriveDirection == robotConfig::FORWARD) ? (rightCurrent >= rightTargetEncoder) : (rightCurrent <= rightTargetEncoder);
 
+        // If EITHER wheel finishes, cut power to both immediately to prevent spinning, then correct overshoot
         if (leftDone || rightDone) {
-            // Setup independent braking directions
-            leftBrakeDirection = (leftDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
-            rightBrakeDirection = (rightDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+            leftMotor.drive(0, robotConfig::STOPPED);
+            rightMotor.drive(0, robotConfig::STOPPED);
             
-            // Set targets `brakeTicks` away in the new direction
-            leftBrakeTarget = leftCurrent + ((leftBrakeDirection == robotConfig::FORWARD) ? brakeTicks : -brakeTicks);
-            rightBrakeTarget = rightCurrent + ((rightBrakeDirection == robotConfig::FORWARD) ? brakeTicks : -brakeTicks);
-            
-            leftMotor.drive(robotConfig::MAX_DUTY / 2, leftBrakeDirection);
-            rightMotor.drive(robotConfig::MAX_DUTY / 2, rightBrakeDirection);
-            
+            // Move to Braking phase to calculate and correct the overshoot
             state = Braking;
         }
     }
+    
+    // ---------------------------------------------------------
+    // STATE 2: One-Time Overshoot Correction
+    // ---------------------------------------------------------
     else if (state == Braking) {
-        // Evaluate completion based on the BRAKING direction
-        bool leftBrakeDone = (leftBrakeDirection == robotConfig::FORWARD) ? (leftCurrent >= leftBrakeTarget) : (leftCurrent <= leftBrakeTarget);
-        bool rightBrakeDone = (rightBrakeDirection == robotConfig::FORWARD) ? (rightCurrent >= rightBrakeTarget) : (rightCurrent <= rightBrakeTarget);
+        // Calculate exactly how many ticks each wheel overshot by
+        long leftOvershoot = leftCurrent - leftTargetEncoder;
+        long rightOvershoot = rightCurrent - rightTargetEncoder;
 
-        // Turn off motors individually as they finish their reverse pulse
-        if (leftBrakeDone) leftMotor.drive(0, robotConfig::STOPPED);
-        if (rightBrakeDone) rightMotor.drive(0, robotConfig::STOPPED);
+        bool leftNeedsCorrection = abs(leftOvershoot) > 2;
+        bool rightNeedsCorrection = abs(rightOvershoot) > 2;
 
-        if (leftBrakeDone && rightBrakeDone) {
-            state = Idle; 
+        if (leftNeedsCorrection || rightNeedsCorrection) {
+            
+            // Run correction at a very low, safe speed
+            int leftCorrectionDuty = leftMotor.mapSpeedToDutyCycle(0.05f);
+            int rightCorrectionDuty = rightMotor.mapSpeedToDutyCycle(0.05f);
+            
+            // Apply correction to left wheel if needed
+            if (leftNeedsCorrection) {
+                // If overshoot is positive, we need to go reverse. If negative, go forward.
+                leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                leftMotor.drive(leftCorrectionDuty, leftDriveDirection);
+            } else {
+                leftMotor.drive(0, robotConfig::STOPPED);
+            }
+
+            // Apply correction to right wheel if needed
+            if (rightNeedsCorrection) {
+                rightDriveDirection = (rightOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                rightMotor.drive(rightCorrectionDuty, rightDriveDirection);
+            } else {
+                rightMotor.drive(0, robotConfig::STOPPED);
+            }
+            
+            // Reset start encoders so the PD sync loop doesn't freak out during the tiny correction push
+            leftStartEncoder = leftCurrent;
+            rightStartEncoder = rightCurrent;
+            targetSpeed = 0.05f; 
+            
+            // Loop back to Driving state to finish these last few correction ticks cleanly using the same target
+            state = DrivingStraight; 
+            
+        } else {
+            // If both wheels are within the 2-tick tolerance buffer, we are perfectly on target!
+            leftMotor.drive(0, robotConfig::STOPPED);
+            rightMotor.drive(0, robotConfig::STOPPED);
+            state = Idle;
         }
     }
 }
