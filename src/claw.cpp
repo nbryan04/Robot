@@ -16,7 +16,7 @@ void Claw::begin() {
     
     // Set initial resting states
     setAngle(apin, robotConfig::ARM_UP_ANGLE);
-    setAngle(hpin, robotConfig::HAND_OPEN_ANGLE);
+    setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);
 }
 
 // Helper method to handle the PWM math (add 'void setAngle(int pin, int angle);' to your claw.h)
