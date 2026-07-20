@@ -31,7 +31,7 @@ void Drivetrain::driveStraight(float distanceMM, float speed) {
 }
 
 void Drivetrain::turn(float degrees, float speed) {
-    float trackWidth = 202.5; // (mm) 
+    float trackWidth = 208; // (mm) 
     float turningCircumference = PI * trackWidth;
     
     float distanceMM = turningCircumference * (abs(degrees) / 360.0f);
@@ -121,7 +121,7 @@ void Drivetrain::update() {
         if (leftDone || rightDone) {
             leftMotor.drive(0, robotConfig::STOPPED);
             rightMotor.drive(0, robotConfig::STOPPED);
-            state = Braking;
+            state = Braking; 
         }
     }
     
@@ -132,13 +132,13 @@ void Drivetrain::update() {
         long leftOvershoot = leftCurrent - leftTargetEncoder;
         long rightOvershoot = rightCurrent - rightTargetEncoder;
 
-        int deadband = 10; // Ticks of acceptable error tolerance
+        int deadband = 30; // Ticks of acceptable error tolerance
         
         bool leftNeedsCorrection = abs(leftOvershoot) > deadband;
         bool rightNeedsCorrection = abs(rightOvershoot) > deadband;
 
         if (leftNeedsCorrection || rightNeedsCorrection) {
-            int nudgePWM = 350; 
+            int nudgePWM = 400; 
             
             if (leftNeedsCorrection) {
                 leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;

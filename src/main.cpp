@@ -51,10 +51,109 @@ Motor motorLeft(PWM_PIN_FORWARD_LEFT, PWM_PIN_REVERSE_LEFT, ENCODER_PIN1_LEFT, E
 Motor motorRight(PWM_PIN_FORWARD_RIGHT, PWM_PIN_REVERSE_RIGHT, ENCODER_PIN1_RIGHT, ENCODER_PIN2_RIGHT, 
                  robotConfig::WHEEL_1_DIAMETER, robotConfig::MOTOR2_POLARITY, robotConfig::rightSpeedToDuty);
 
-Drivetrain chassis(motorLeft, motorRight);
+Drivetrain drivetrain(motorLeft, motorRight);
 
 // Timer for non-blocking OLED updates
 unsigned long lastDisplayTime = 0;
+
+// Define the steps of our specific movement sequence
+enum SequenceState {
+    SEQ_IDLE,
+    SEQ_TURN_OUT,
+    SEQ_WAIT_TURN_OUT,
+    SEQ_DRIVE_FWD,
+    SEQ_WAIT_FWD,
+    SEQ_DRIVE_REV,
+    SEQ_WAIT_REV,
+    SEQ_TURN_IN,
+    SEQ_WAIT_TURN_IN,
+    SEQ_DONE
+};
+
+SequenceState currentSequence = SEQ_IDLE;
+
+void updateMovementSequence() {
+    switch (currentSequence) {
+        case SEQ_IDLE:
+        case SEQ_DONE:
+            // Do nothing if the sequence hasn't started or is finished
+            break;
+
+        case SEQ_TURN_OUT:
+            // Turn 45 degrees clockwise at 0.2 m/s
+            drivetrain.turn(45.0, 0.2); 
+            currentSequence = SEQ_WAIT_TURN_OUT;
+            break;
+
+        case SEQ_WAIT_TURN_OUT:
+            // Wait until the drivetrain's internal state machine returns to Idle
+            if (drivetrain.state == Drivetrain::Idle) {
+                currentSequence = SEQ_DRIVE_FWD;
+            }
+            break;
+
+        case SEQ_DRIVE_FWD:
+            // Drive forward 50mm (5cm) at 0.2 m/s
+            drivetrain.driveStraight(50.0, 0.2);
+            currentSequence = SEQ_WAIT_FWD;
+            break;
+
+        case SEQ_WAIT_FWD:
+            if (drivetrain.state == Drivetrain::Idle) {
+                currentSequence = SEQ_DRIVE_REV;
+            }
+            break;
+
+        case SEQ_DRIVE_REV:
+            // Drive backward 50mm at 0.2 m/s
+            drivetrain.driveStraight(-50.0, 0.2);
+            currentSequence = SEQ_WAIT_REV;
+            break;
+
+        case SEQ_WAIT_REV:
+            if (drivetrain.state == Drivetrain::Idle) {
+                currentSequence = SEQ_TURN_IN;
+            }
+            break;
+
+        case SEQ_TURN_IN:
+            // Turn -45 degrees (counter-clockwise) to un-rotate
+            drivetrain.turn(-45.0, 0.2);
+            currentSequence = SEQ_WAIT_TURN_IN;
+            break;
+
+        case SEQ_WAIT_TURN_IN:
+            if (drivetrain.state == Drivetrain::Idle) {
+                currentSequence = SEQ_DONE; // Sequence complete!
+            }
+            break;
+    }
+}
+
+void setup() {
+    motorLeft.begin();
+    motorRight.begin();
+    
+    // Kick off the sequence
+    currentSequence = SEQ_TURN_OUT;
+}
+
+void loop() {
+    // 1. Keep the individual motor speed calculations running
+    motorLeft.speed();
+    motorRight.speed();
+    
+    // 2. Keep the drivetrain PID and deceleration math running
+    drivetrain.update();
+
+    // 3. Keep our new sequence manager running to feed commands to the drivetrain
+    updateMovementSequence();
+
+    // 4. Do other things! Check sensors, update your OLED display, move the claw, etc.
+    // The ESP32 is completely free to run code here while the robot dances.
+}
+/*
+long ticksToMove = 0; // Global variable to hold the number of ticks to move
 
 void setup() {
     Serial.begin(115200);
@@ -66,7 +165,15 @@ void setup() {
     delay(1000); // Brief pause before starting
 
     // Command the robot to drive 1000mm forward at 0.2 m/s
-    chassis.turn(90, 0.2); // Turn 90 degrees at 0.2 m/s
+    chassis.turn(-360, 0.15); // Turn 360 degrees at 0.2 m/s
+
+    float trackWidth = 208; // (mm) 
+    float turningCircumference = PI * trackWidth;
+    
+    float distanceMM = turningCircumference * (abs(360) / 360.0f);
+
+    float revolutions = distanceMM / robotConfig::WHEEL_1_CIRCUMFERENCE;
+    ticksToMove = revolutions * robotConfig::PULSES_REV;
 }
 
 void loop() {
@@ -83,6 +190,9 @@ void loop() {
         display_handler.setTextColor(SSD1306_WHITE);
         display_handler.setCursor(0,0);
         
+        display_handler.print("Goal Ticks: ");
+        display_handler.println(ticksToMove);
+
         // Print Current State (0=Idle, 1=Driving, 2=Turning, 3=Braking)
         display_handler.print("State: ");
         display_handler.println(chassis.state);
@@ -101,4 +211,4 @@ void loop() {
         
         display_handler.display();
     }
-}
+}*/
