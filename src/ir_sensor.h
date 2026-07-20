@@ -22,6 +22,7 @@ public:
     bool  detected() const  { return _state == State::DETECTED; }
     bool  searching() const { return _state == State::SEARCHING; }
     float magnitude() const { return _lastMag; }     // last window's AC amplitude estimate, ~[0,1]
+    float threshold() const { return _threshold; }   // amplitude the current target must clear
     float targetFreq() const { return _targetFreq; } // frequency currently being hunted
 
 private:
