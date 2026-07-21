@@ -19,6 +19,7 @@ void Mission::enter(State s) {
     state = s;
     subStep = 0;
     stateTimer = millis();
+    if (s == CENTRE_ROCK) centreAttempts = 0;  // fresh distance-correction loop
 }
 
 bool Mission::driveIdle() {
@@ -92,7 +93,10 @@ void Mission::update() {
                     drive.turn(HOP_LEGS[idx][hopLeg].angleDeg, HOP_SPEED);
                     subStep = 1;
                 } else {
-                    // Whole path done. Tilt cross-check: ramp may show up here.
+                    // Whole path done: this arrival heading is the reference the
+                    // next hop is measured from. Start tracking excursion rotation.
+                    clusterHeading = 0.0f;
+                    // Tilt cross-check: ramp may show up here.
                     if (level == LOWER && tilt.isOnRamp()) {
                         enter(RAMP_APPROACH);
                     } else if (enableRockSearch) {
@@ -114,39 +118,49 @@ void Mission::update() {
         if (subStep == 0) {
             // Rotate to the start of the arc.
             drive.turn(-SWEEP_ARC / 2.0f, SWEEP_SPEED);
+            clusterHeading += -SWEEP_ARC / 2.0f;
             subStep = 1;
         } else if (subStep == 1) {
             if (driveIdle()) {
                 // Sweep across the full arc while polling the ultrasonic.
-                ultra.scanState = Ultrasonic::WAITING_FOR_OBJECT;
+                // beginScan() wipes stale readings so no pre-sweep data can
+                // trigger a false edge.
+                ultra.beginScan();
                 foundStartEdge = false;
                 foundEndEdge = false;
                 drive.turn(SWEEP_ARC, SWEEP_SPEED);
+                clusterHeading += SWEEP_ARC;
                 subStep = 2;
             }
         } else {  // subStep == 2: sweeping
+            // Readings glitch as the beam glances off a rock's edges, so we
+            // don't trust the distance to "confirm" the rock. Instead we take
+            // the FIRST start edge and the LAST end edge (collapsing any edge
+            // flicker into one span) and validate by angular width below.
             Ultrasonic::EdgeEvent e = ultra.checkEdgeEvents();
             float h = sweepHeadingDeg(SWEEP_ARC);
             if (e == Ultrasonic::START_EDGE) {
-                foundStartEdge = true;
-                startEdgeAngle = h;
+                if (!foundStartEdge) {          // keep the first entry
+                    foundStartEdge = true;
+                    startEdgeAngle = h;
+                }
             } else if (e == Ultrasonic::END_EDGE && foundStartEdge) {
                 foundEndEdge = true;
-                endEdgeAngle = h;
+                endEdgeAngle = h;               // keep updating to the last exit
             }
 
             if (driveIdle()) {
-                // Sweep finished (robot now at +SWEEP_ARC/2).
-                if (foundStartEdge) {
-                    if (foundEndEdge) {
-                        rockBearing = (startEdgeAngle + endEdgeAngle) / 2.0f;
-                    } else {
-                        // Object ran to the edge of the arc; use its midpoint.
-                        rockBearing = (startEdgeAngle + SWEEP_ARC / 2.0f) / 2.0f;
-                    }
+                // A real rock subtends a big enough angle between its edges;
+                // a noise glitch collapses to a tiny span. Require both edges
+                // AND a wide enough gap.
+                float rockWidth = endEdgeAngle - startEdgeAngle;
+                if (rockWidth < 0) rockWidth = -rockWidth;
+
+                if (foundStartEdge && foundEndEdge && rockWidth >= MIN_ROCK_ANGLE) {
+                    rockBearing = (startEdgeAngle + endEdgeAngle) / 2.0f;
                     enter(TRAVEL_TO_ROCK);
                 } else {
-                    // Rock not found: cluster missed.
+                    // No clean low-high-low blip wide enough to be a rock.
                     enter(ADVANCE_CLUSTER);
                 }
             }
@@ -158,6 +172,7 @@ void Mission::update() {
         if (subStep == 0) {
             // Face the rock: from +SWEEP_ARC/2 to rockBearing.
             drive.turn(rockBearing - SWEEP_ARC / 2.0f, SWEEP_SPEED);
+            clusterHeading += rockBearing - SWEEP_ARC / 2.0f;
             subStep = 1;
         } else if (subStep == 1) {
             if (driveIdle()) {
@@ -177,23 +192,41 @@ void Mission::update() {
         }
         break;
 
-    // ---- n4: Centre on Rock (re-zero odometry) ----------------------------
-    case CENTRE_ROCK: {
-        // Per-move relative odometry: facing the rock IS the fresh origin, so
-        // there is nothing global to reset here.
-        // TODO: add a fine ±nudge sweep to minimise distance if needed.
-        float d = ultra.filteredDistanceCm;
-        bool inRange = (d > 0 && d < GRAB_DISTANCE_CM + CENTRE_MARGIN_CM);
-        if (inRange) {
-            // Claw is upright here: capture the metal reference for this rock.
-            metalReference = metal.getReferenceFrequency();
-            enter(TELETUBBY_SWEEP);
-        } else {
-            // Centering fails.
-            enter(ADVANCE_CLUSTER);
+    // ---- n4: Centre on Rock (drive to the target distance) ----------------
+    // TRAVEL overshoots because the averaged reading lags the motion, so here
+    // we close the loop: let the reading settle, then nudge forward/back to sit
+    // at GRAB_DISTANCE_CM. Per-move relative odometry: facing the rock IS the
+    // fresh origin, nothing global to reset.
+    case CENTRE_ROCK:
+        if (subStep == 0) {
+            // Let the ultrasonic filter settle now the robot is stopped.
+            stateTimer = millis();
+            subStep = 1;
+        } else if (subStep == 1) {
+            if (millis() - stateTimer < CENTRE_SETTLE_MS) break;
+
+            float d = ultra.filteredDistanceCm;
+            bool valid = (d > 0 && d < Ultrasonic::MAX_VALID_DISTANCE);
+            if (!valid) {
+                enter(ADVANCE_CLUSTER);  // lost the rock while aligning
+                break;
+            }
+
+            float errorCm = d - GRAB_DISTANCE_CM;  // + = too far, - = too close
+            if (fabs(errorCm) <= CENTRE_MARGIN_CM || centreAttempts >= CENTRE_MAX_TRIES) {
+                // At target: nothing to tare here. The metal baseline is taken
+                // later at the hover position (clear of the rear metal).
+                enter(TELETUBBY_SWEEP);
+            } else {
+                // Drive the distance error: forward if too far, back if too close.
+                centreAttempts++;
+                drive.driveStraight(errorCm * 10.0f, CENTRE_SPEED);
+                subStep = 2;
+            }
+        } else {  // subStep == 2: wait for the correction move, then re-measure
+            if (driveIdle()) subStep = 0;
         }
         break;
-    }
 
     // ---- n5: Teletubby sweep ----------------------------------------------
     case TELETUBBY_SWEEP:
@@ -272,31 +305,48 @@ void Mission::update() {
     // ---- n6: Lower claw ---------------------------------------------------
     case LOWER_CLAW:
         if (subStep == 0) {
-            claw.lowerForScan();
+            claw.lowerToHover();          // close -> hover -> open, stop at hover
             subStep = 1;
-        } else if (!claw.actionBusy()) {
-            enter(SCAN_METAL);
+        } else if (subStep == 1) {
+            if (!claw.actionBusy()) {
+                // Baseline the detector HERE, at hover: the coil is extended out
+                // front, clear of the rock and the metal at the back of the
+                // robot. recalibrate() takes a fresh sample and flushes the
+                // filter so no rest-position readings contaminate the baseline.
+                metal.recalibrate(HOVER_SAMPLE_MS);
+                claw.lowerToRock();       // hover -> down onto the rock
+                subStep = 2;
+            }
+        } else {
+            if (!claw.actionBusy()) enter(SCAN_METAL);
         }
         break;
 
     // ---- n7: Scan for metal -----------------------------------------------
-    case SCAN_METAL: {
-        bool metalDetected;
-        if (testMetalOnRock > 0) {
-            // TEST override: fake metal only on the chosen rock (1-based).
-            metalDetected = (rocks_visited + 1 == testMetalOnRock);
+    case SCAN_METAL:
+        if (subStep == 0) {
+            // Claw just reached the rock: let the frequency filter settle at the
+            // lowered position before trusting the shift.
+            stateTimer = millis();
+            subStep = 1;
         } else {
-            float reading = metal.getReading();
-            metalDetected = fabs(reading - metalReference) > METAL_DELTA;
-        }
+            if (millis() - stateTimer < SCAN_SETTLE_MS) break;
 
-        if (metalDetected) {
-            enter(ENGAGE_CLAW);   // metal detected
-        } else {
-            enter(RAISE_CLAW);    // no metal (decoy)
+            bool metalDetected;
+            if (testMetalOnRock > 0) {
+                // TEST override: fake metal only on the chosen rock (1-based).
+                metalDetected = (rocks_visited + 1 == testMetalOnRock);
+            } else {
+                metalDetected = metal.isMetalDetected();
+            }
+
+            if (metalDetected) {
+                enter(ENGAGE_CLAW);   // metal detected
+            } else {
+                enter(RAISE_CLAW);    // no metal (decoy)
+            }
         }
         break;
-    }
 
     // ---- n8: Engage Claw --------------------------------------------------
     case ENGAGE_CLAW:
@@ -331,8 +381,24 @@ void Mission::update() {
 
     // ---- n12: Advance to next cluster -------------------------------------
     case ADVANCE_CLUSTER:
-        rocks_visited += 1;
-        enter(ALL_DONE);
+        // Undo the net rotation the sweep/approach added, so the next hop is
+        // measured from the heading we ARRIVED with — not from wherever the
+        // sweep left us (which, on a miss, is +SWEEP_ARC/2 off).
+        if (subStep == 0) {
+            if (fabs(clusterHeading) > 0.5f) {
+                drive.turn(-clusterHeading, SWEEP_SPEED);
+                clusterHeading = 0.0f;
+                subStep = 1;
+            } else {
+                rocks_visited += 1;
+                enter(ALL_DONE);
+            }
+        } else {
+            if (driveIdle()) {
+                rocks_visited += 1;
+                enter(ALL_DONE);
+            }
+        }
         break;
 
     // ---- n23: All rocks done? ---------------------------------------------

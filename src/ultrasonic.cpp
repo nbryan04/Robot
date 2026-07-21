@@ -30,6 +30,24 @@ void IRAM_ATTR Ultrasonic::handleInterrupt() {
     }
 }
 
+// Wipe the filter + history buffers and re-arm edge detection so a new sweep
+// starts clean, with no stale pre-sweep readings able to trigger a false edge.
+void Ultrasonic::beginScan() {
+    for (int i = 0; i < FILTER_SIZE; i++) {
+        readings[i] = 0.0;
+        filteredHistory[i] = 0.0;
+    }
+    readIndex = 0;
+    bufferFull = false;
+    historyIndex = 0;
+    historyFull = false;
+    newEdgeDataReady = false;
+    debounceCount = 0;
+    currentDistanceCm = -1.0;
+    filteredDistanceCm = -1.0;
+    scanState = WAITING_FOR_OBJECT;
+}
+
 // Simple average of the circular buffer
 float Ultrasonic::calculateMean() {
     float sum = 0.0;

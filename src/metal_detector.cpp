@@ -1,53 +1,63 @@
 #include "metal_detector.h"
 
-MetalDetector::MetalDetector(int pin, unsigned long interval, float thresholdHz)
-    : sensorPin(pin), updateInterval(interval), threshold(thresholdHz) {
+// Legacy PCNT counter limit. The hardware auto-resets the count to 0 when it
+// reaches this, and fires the H_LIM event we tally as an overflow.
+static const int16_t PCNT_HIGH_LIMIT = 30000;
+
+MetalDetector::MetalDetector(int pin, unsigned long interval, float thresholdHz,
+                             pcnt_unit_t unit)
+    : sensorPin(pin), pcntUnit(unit), updateInterval(interval), threshold(thresholdHz) {
     // Initialize the filter buffer array with zeros
     for(int i = 0; i < FILTER_SIZE; i++) {
         freqBuffer[i] = 0.0;
     }
 }
 
-// ISR that fires silently in the background whenever the counter hits 30,000
-bool IRAM_ATTR MetalDetector::pcnt_overflow_callback(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx) {
-    std::atomic<int>* overflows = static_cast<std::atomic<int>*>(user_ctx);
+// ISR that fires silently in the background whenever the counter hits the high
+// limit (and the hardware auto-resets it to 0). File-static so its signature
+// stays out of the header.
+static void IRAM_ATTR pcnt_overflow_isr(void* arg) {
+    std::atomic<int>* overflows = static_cast<std::atomic<int>*>(arg);
     overflows->fetch_add(1, std::memory_order_relaxed);
-    return false; 
 }
 
 void MetalDetector::begin() {
     Serial.println("Initializing Hardware Pulse Counter (PCNT)...");
 
-    // 1. Configure the PCNT Unit limits
-    pcnt_unit_config_t unit_config = {};
-    unit_config.high_limit = 30000;  // Trigger overflow event here
-    unit_config.low_limit = -1;
-    pcnt_new_unit(&unit_config, &pcnt_unit);
+    // 1. Configure the PCNT unit + channel: count UP on rising edges only.
+    pcnt_config_t cfg = {};
+    cfg.pulse_gpio_num = sensorPin;
+    cfg.ctrl_gpio_num  = PCNT_PIN_NOT_USED;
+    cfg.channel        = PCNT_CHANNEL_0;
+    cfg.unit           = pcntUnit;
+    cfg.pos_mode       = PCNT_COUNT_INC;   // rising edge -> increment
+    cfg.neg_mode       = PCNT_COUNT_DIS;   // falling edge -> ignore
+    cfg.lctrl_mode     = PCNT_MODE_KEEP;
+    cfg.hctrl_mode     = PCNT_MODE_KEEP;
+    cfg.counter_h_lim  = PCNT_HIGH_LIMIT;
+    cfg.counter_l_lim  = -1;               // never reached (count-up only)
+    pcnt_unit_config(&cfg);
 
-    // 2. Assign your sensor pin to this hardware unit
-    pcnt_chan_config_t chan_config = {}; // FIXED: Abbreviated to chan_config_t
-    chan_config.edge_gpio_num = sensorPin;
-    chan_config.level_gpio_num = -1; // -1 means unused
-    pcnt_new_channel(pcnt_unit, &chan_config, &pcnt_chan);
+    // 2. Fire an event (and auto-reset) when we reach the high limit.
+    pcnt_event_enable(pcntUnit, PCNT_EVT_H_LIM);
 
-    // 3. Count UP on rising edges, ignore falling edges
-    pcnt_channel_set_edge_action(pcnt_chan, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD);
+    // 3. Zero and pause while we wire up the ISR.
+    pcnt_counter_pause(pcntUnit);
+    pcnt_counter_clear(pcntUnit);
 
-    // 4. Attach the overflow callback
-    pcnt_event_callbacks_t cbs = { .on_reach = pcnt_overflow_callback };
-    pcnt_unit_register_event_callbacks(pcnt_unit, &cbs, &overflow_count);
-    pcnt_unit_add_watch_point(pcnt_unit, 30000);
+    // 4. Attach the overflow ISR. The service may already be installed by
+    //    ESP32Encoder; a second install just returns an error we can ignore.
+    pcnt_isr_service_install(0);
+    pcnt_isr_handler_add(pcntUnit, pcnt_overflow_isr, &overflow_count);
 
-    // 5. Power up the hardware counter
-    pcnt_unit_enable(pcnt_unit);
-    pcnt_unit_clear_count(pcnt_unit); // FIXED
-    pcnt_unit_start(pcnt_unit);
+    // 5. Start counting.
+    pcnt_counter_resume(pcntUnit);
 
     // --- Calibration Phase ---
     Serial.println("Calibrating metal detector... Keep metal away!");
-    
+
     // Take a deep 2-second sample on startup
-    recalibrate(2000); 
+    recalibrate(2000);
 
     Serial.print("Base Frequency established: ");
     Serial.print(baseFrequency);
@@ -56,34 +66,34 @@ void MetalDetector::begin() {
 
 void MetalDetector::update() {
     unsigned long currentMillis = millis();
-    
+
     if (currentMillis - lastUpdateTime >= updateInterval) {
-        
+
         // 1. Read hardware counter and clear it immediately
-        int hardwareCount = 0;
-        pcnt_unit_get_count(pcnt_unit, &hardwareCount);
-        pcnt_unit_clear_count(pcnt_unit); // FIXED
-        
+        int16_t hardwareCount = 0;
+        pcnt_get_counter_value(pcntUnit, &hardwareCount);
+        pcnt_counter_clear(pcntUnit);
+
         // 2. Fetch and reset overflows
         int overflows = overflow_count.exchange(0, std::memory_order_relaxed);
-        unsigned long totalPulses = (overflows * 30000) + hardwareCount;
-        
+        unsigned long totalPulses = (overflows * PCNT_HIGH_LIMIT) + hardwareCount;
+
         // 3. Calculate raw live frequency for this interval
         float rawFrequency = totalPulses * (1000.0 / updateInterval);
-        
+
         // --- 4. Apply Moving Average Filter ---
         freqSum -= freqBuffer[bufferIndex];        // Subtract the oldest reading
         freqBuffer[bufferIndex] = rawFrequency;    // Insert the newest reading
         freqSum += rawFrequency;                   // Add the newest reading
-        
+
         bufferIndex = (bufferIndex + 1) % FILTER_SIZE; // Wrap index back to 0 if it hits max
-        
+
         currentFrequency = freqSum / FILTER_SIZE;  // Calculate the smoothed average
         // --------------------------------------
-        
+
         // 5. Calculate shift from baseline
         frequencyShift = currentFrequency - baseFrequency;
-        
+
         lastUpdateTime = currentMillis;
     }
 }
@@ -97,32 +107,32 @@ void MetalDetector::tare() {
 // Forces a fresh hardware sample (Blocking)
 void MetalDetector::recalibrate(unsigned long sampleTimeMs) {
     // 1. Clear the hardware counter and overflow tracker
-    pcnt_unit_clear_count(pcnt_unit); // FIXED
+    pcnt_counter_clear(pcntUnit);
     overflow_count.store(0, std::memory_order_relaxed);
-    
+
     // 2. Wait for the sample duration
-    delay(sampleTimeMs); 
-    
+    delay(sampleTimeMs);
+
     // 3. Read the hardware
-    int hardwareCount = 0;
-    pcnt_unit_get_count(pcnt_unit, &hardwareCount);
+    int16_t hardwareCount = 0;
+    pcnt_get_counter_value(pcntUnit, &hardwareCount);
     int overflows = overflow_count.exchange(0, std::memory_order_relaxed);
-    
-    unsigned long totalPulses = (overflows * 30000) + hardwareCount;
-    
+
+    unsigned long totalPulses = (overflows * PCNT_HIGH_LIMIT) + hardwareCount;
+
     // 4. Resume normal counting
-    pcnt_unit_clear_count(pcnt_unit); // FIXED
-    
+    pcnt_counter_clear(pcntUnit);
+
     // 5. Calculate new baseline and reset the math
     baseFrequency = totalPulses * (1000.0 / sampleTimeMs);
-    
+
     // Flush the moving average buffer so old data doesn't drag the new baseline down
     for(int i = 0; i < FILTER_SIZE; i++) {
         freqBuffer[i] = baseFrequency;
     }
     freqSum = baseFrequency * FILTER_SIZE;
     bufferIndex = 0;
-    
+
     frequencyShift = 0.0;
     lastUpdateTime = millis();
 }

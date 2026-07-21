@@ -112,8 +112,14 @@ static constexpr unsigned long DOWN_MS  = 400;  // OPENING:    open  -> arm down
 static constexpr unsigned long GRAB_MS  = 400;  // LOWERING:   down  -> close/grab
 static constexpr unsigned long LIFT_MS  = 800;  // LIFTING:    arm up settle
 
-void Claw::lowerForScan() {
-    actionSeq = ACT_LOWER;
+void Claw::lowerToHover() {
+    actionSeq = ACT_LOWER_HOVER;
+    actionStep = 0;
+    actionStepTime = millis();
+}
+
+void Claw::lowerToRock() {
+    actionSeq = ACT_LOWER_ROCK;
     actionStep = 0;
     actionStepTime = millis();
 }
@@ -145,11 +151,12 @@ void Claw::updateAction() {
 
     switch (actionSeq) {
 
-        // Lower the detector to the rock. Mirrors INIT_CLOSE -> HOVERING ->
-        // OPENING -> LOWERING: the hand does NOT open until the arm has reached
-        // the hover angle (ARM_DOWN_ANGLE + 45). Stops with the arm down and the
-        // hand open, ready to scan / grab.
-        case ACT_LOWER:
+        // Lower to the HOVER position. Mirrors INIT_CLOSE -> HOVERING ->
+        // OPENING: the hand does NOT open until the arm has reached the hover
+        // angle (ARM_DOWN_ANGLE + 45). Stops at hover with the hand open so the
+        // mission can baseline the metal detector here, clear of the rock and
+        // the metal at the back of the robot.
+        case ACT_LOWER_HOVER:
             if (actionStep == 0) {                          // ensure hand closed
                 setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);
                 actionStep = 1;
@@ -163,11 +170,18 @@ void Claw::updateAction() {
                 actionStep = 3;
                 actionStepTime = now;
             } else if (actionStep == 3 && now - actionStepTime >= DOWN_MS) {
-                setAngle(apin, robotConfig::ARM_DOWN_ANGLE);       // fully down
-                actionStep = 4;
+                actionSeq = ACT_NONE;                              // at hover, open
+            }
+            break;
+
+        // Continue from hover down onto the rock (hand stays open).
+        case ACT_LOWER_ROCK:
+            if (actionStep == 0) {
+                setAngle(apin, robotConfig::ARM_DOWN_ANGLE);       // hover -> down
+                actionStep = 1;
                 actionStepTime = now;
-            } else if (actionStep == 4 && now - actionStepTime >= GRAB_MS) {
-                actionSeq = ACT_NONE;                              // done
+            } else if (actionStep == 1 && now - actionStepTime >= GRAB_MS) {
+                actionSeq = ACT_NONE;                              // at the rock
             }
             break;
 

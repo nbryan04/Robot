@@ -51,7 +51,8 @@ public:
     
     void begin();
     void update();
-    float calculateMean(); 
+    void beginScan();   // clear filter + history and re-arm edge detection for a fresh sweep
+    float calculateMean();
     
     // The new reporting function
     EdgeEvent checkEdgeEvents(); 

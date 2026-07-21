@@ -1,21 +1,24 @@
 #pragma once
 #include <Arduino.h>
 #include <atomic>
-#include "driver/pulse_cnt.h" 
+#include "driver/pcnt.h"   // legacy PCNT — the SAME driver ESP32Encoder uses
 
+// Uses the legacy PCNT driver so it shares the hardware cleanly with the
+// encoders (which use ESP32Encoder). The encoders take units 0 and 1, so this
+// detector defaults to unit 2 to avoid any collision. Do NOT mix this with the
+// newer driver/pulse_cnt.h in the same firmware.
 class MetalDetector {
 private:
     int sensorPin;
+    pcnt_unit_t pcntUnit;         // hardware unit (kept off the encoders' 0/1)
     unsigned long updateInterval;
-    float threshold; 
+    float threshold;
 
-    // --- PCNT Hardware Tracking ---
-    pcnt_unit_handle_t pcnt_unit = NULL;
-    pcnt_channel_handle_t pcnt_chan = NULL;
+    // --- Overflow tracking (counter auto-resets at the high limit) ---
     std::atomic<int> overflow_count{0};
 
     // --- Moving Average Filter ---
-    static const int FILTER_SIZE = 5; 
+    static const int FILTER_SIZE = 5;
     float freqBuffer[FILTER_SIZE];
     int bufferIndex = 0;
     float freqSum = 0.0;
@@ -25,18 +28,16 @@ private:
     float frequencyShift = 0.0;
     unsigned long lastUpdateTime = 0;
 
-    // Hardware interrupt callback for when the 16-bit counter maxes out
-    static bool IRAM_ATTR pcnt_overflow_callback(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx);
-
 public:
-    // Constructor allows you to tune the interval and sensitivity
-    MetalDetector(int pin, unsigned long interval = 500, float thresholdHz = 50.0);
+    // Constructor allows you to tune the interval, sensitivity, and PCNT unit.
+    MetalDetector(int pin, unsigned long interval = 500, float thresholdHz = 50.0,
+                  pcnt_unit_t unit = PCNT_UNIT_2);
 
     void begin();
     void update();
-    
+
     // Calibration methods
-    void tare(); 
+    void tare();
     void recalibrate(unsigned long sampleTimeMs = 1000);
 
     // Data getters

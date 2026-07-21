@@ -114,6 +114,9 @@ private:
     // Per-state bookkeeping.
     int subStep = 0;
     int hopLeg = 0;                // which leg of the current hop we are on
+    int centreAttempts = 0;        // distance-correction passes in CENTRE_ROCK
+    float clusterHeading = 0.0f;   // net rotation (deg) added by the sweep/approach
+                                   // since the hop finished; undone before the next hop
     unsigned long stateTimer = 0;
 
     // Per-rock working values.
@@ -123,7 +126,6 @@ private:
     bool foundStartEdge = false;
     bool foundEndEdge = false;
     float teletubbyBearing = 0.0f; // deg from rock-forward
-    float metalReference = 0.0f;
 
     // ---------------- Temporary tuning values ----------------
     // Hardcoded placeholders; each measured on the real field later.
@@ -142,17 +144,25 @@ private:
         { {0, 0} },                 // -> rock 5 (upper deck, after ramp)
         { {0, 0} },                 // -> rock 6 (upper deck)
     };
-    float HOP_SPEED = 0.150f;
+    float HOP_SPEED = 0.15f;
 
-    float SWEEP_ARC        = 120.0f;  // deg, wide arc to cover drift
+    float SWEEP_ARC        = 40.0f;  // deg, wide arc to cover drift
     float SWEEP_SPEED      = 0.15f;
-    float GRAB_DISTANCE_CM = 6.0f;    // ultrasonic reading = at grab distance
-    float CENTRE_MARGIN_CM = 3.0f;    // slack when verifying we are centred
+    float MIN_ROCK_ANGLE   = 3.0f;    // deg between start/end edges to count as a rock
+    float GRAB_DISTANCE_CM = 13.0f;   // target ultrasonic distance at the rock
+    float CENTRE_MARGIN_CM = 3.0f;    // acceptable +/- error from the target
+    float CENTRE_SPEED     = 0.12f;   // slow speed for distance corrections
+    unsigned long CENTRE_SETTLE_MS = 250;  // let the filter settle before measuring
+    int CENTRE_MAX_TRIES = 3;         // give up correcting after this many passes
 
     float TRAVEL_MAX_MM = 500.0f;     // give-up distance driving toward a rock
     float TRAVEL_SPEED  = 0.15f;
 
-    float METAL_DELTA = 500.0f;        // |reading - reference| over this = metal
+    // Metal scan: baseline is taken at hover (clear of the rear metal) via a
+    // fresh recalibrate sample, then we wait for the filter to settle at the
+    // lowered position before reading the shift.
+    unsigned long HOVER_SAMPLE_MS = 500;   // recalibrate sample time at hover
+    unsigned long SCAN_SETTLE_MS  = 1500;  // filter settle at the rock before scan
 
     unsigned long POINT_DWELL_MS = 600; // pause while pointing at a teletubby
 
