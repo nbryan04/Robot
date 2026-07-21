@@ -38,5 +38,9 @@ struct Drivetrain {
     void driveStraight(float distanceMM, float speed);
     void turn(float degrees, float speed);
     void stop();
-    void update(); 
+    void update();
+
+    // Fraction (0..1) of the active driveStraight/turn move completed.
+    // Used by the mission FSM to estimate heading during a sweep.
+    float moveProgress();
 };

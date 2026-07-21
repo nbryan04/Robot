@@ -43,6 +43,9 @@ void Claw::startGrabSequence() {
 }
 
 void Claw::update() {
+    // Advance any granular staged action (independent of the GrabState machine).
+    if (actionSeq != ACT_NONE) updateAction();
+
     if (currentState == IDLE) return;
 
     unsigned long currentTime = millis();
@@ -96,6 +99,127 @@ void Claw::update() {
             break;
             
         case IDLE:
+            break;
+    }
+}
+
+// ---- Granular non-blocking actions used by the mission FSM ----------------
+// Staged sequences that mimic startGrabSequence()'s stage timings exactly.
+// Stage delays (ms), matching the GrabState machine above:
+static constexpr unsigned long HOVER_MS = 400;  // INIT_CLOSE: close -> hover
+static constexpr unsigned long OPEN_MS  = 600;  // HOVERING:   hover -> OPEN hand
+static constexpr unsigned long DOWN_MS  = 400;  // OPENING:    open  -> arm down
+static constexpr unsigned long GRAB_MS  = 400;  // LOWERING:   down  -> close/grab
+static constexpr unsigned long LIFT_MS  = 800;  // LIFTING:    arm up settle
+
+void Claw::lowerForScan() {
+    actionSeq = ACT_LOWER;
+    actionStep = 0;
+    actionStepTime = millis();
+}
+
+void Claw::closeHand() {
+    actionSeq = ACT_CLOSE;
+    actionStep = 0;
+    actionStepTime = millis();
+}
+
+void Claw::storeToBasket() {
+    actionSeq = ACT_STORE;
+    actionStep = 0;
+    actionStepTime = millis();
+}
+
+void Claw::raiseToRest() {
+    actionSeq = ACT_RAISE;
+    actionStep = 0;
+    actionStepTime = millis();
+}
+
+bool Claw::actionBusy() {
+    return actionSeq != ACT_NONE;
+}
+
+void Claw::updateAction() {
+    unsigned long now = millis();
+
+    switch (actionSeq) {
+
+        // Lower the detector to the rock. Mirrors INIT_CLOSE -> HOVERING ->
+        // OPENING -> LOWERING: the hand does NOT open until the arm has reached
+        // the hover angle (ARM_DOWN_ANGLE + 45). Stops with the arm down and the
+        // hand open, ready to scan / grab.
+        case ACT_LOWER:
+            if (actionStep == 0) {                          // ensure hand closed
+                setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);
+                actionStep = 1;
+                actionStepTime = now;
+            } else if (actionStep == 1 && now - actionStepTime >= HOVER_MS) {
+                setAngle(apin, robotConfig::ARM_DOWN_ANGLE + 45);  // hover
+                actionStep = 2;
+                actionStepTime = now;
+            } else if (actionStep == 2 && now - actionStepTime >= OPEN_MS) {
+                setAngle(hpin, robotConfig::HAND_OPEN_ANGLE);      // open at hover
+                actionStep = 3;
+                actionStepTime = now;
+            } else if (actionStep == 3 && now - actionStepTime >= DOWN_MS) {
+                setAngle(apin, robotConfig::ARM_DOWN_ANGLE);       // fully down
+                actionStep = 4;
+                actionStepTime = now;
+            } else if (actionStep == 4 && now - actionStepTime >= GRAB_MS) {
+                actionSeq = ACT_NONE;                              // done
+            }
+            break;
+
+        // Grab: close the hand (mirrors LOWERING -> GRABBING).
+        case ACT_CLOSE:
+            if (actionStep == 0) {
+                setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);
+                actionStep = 1;
+                actionStepTime = now;
+            } else if (actionStep == 1 && now - actionStepTime >= GRAB_MS) {
+                actionSeq = ACT_NONE;
+            }
+            break;
+
+        // Store: raise the arm (holding the rock), then open to drop it.
+        case ACT_STORE:
+            if (actionStep == 0) {
+                setAngle(apin, robotConfig::ARM_UP_ANGLE);
+                actionStep = 1;
+                actionStepTime = now;
+            } else if (actionStep == 1 && now - actionStepTime >= LIFT_MS) {
+                setAngle(hpin, robotConfig::HAND_OPEN_ANGLE);      // release
+                actionStep = 2;
+                actionStepTime = now;
+            } else if (actionStep == 2 && now - actionStepTime >= GRAB_MS) {
+                actionSeq = ACT_NONE;
+            }
+            break;
+
+        // Decoy (no metal): do NOT close at the bottom or we would pick up the
+        // rock. Raise to hover with the hand still OPEN (below the arch, so open
+        // is safe and the rock is left behind), close ONLY at hover (clear of the
+        // rock), then raise to rest with the hand closed to clear the arch.
+        case ACT_RAISE:
+            if (actionStep == 0) {
+                setAngle(apin, robotConfig::ARM_DOWN_ANGLE + 45);  // up to hover, still open
+                actionStep = 1;
+                actionStepTime = now;
+            } else if (actionStep == 1 && now - actionStepTime >= HOVER_MS) {
+                setAngle(hpin, robotConfig::HAND_CLOSE_ANGLE);     // close at hover only
+                actionStep = 2;
+                actionStepTime = now;
+            } else if (actionStep == 2 && now - actionStepTime >= GRAB_MS) {
+                setAngle(apin, robotConfig::ARM_UP_ANGLE);         // clear the arch, closed
+                actionStep = 3;
+                actionStepTime = now;
+            } else if (actionStep == 3 && now - actionStepTime >= LIFT_MS) {
+                actionSeq = ACT_NONE;
+            }
+            break;
+
+        case ACT_NONE:
             break;
     }
 }

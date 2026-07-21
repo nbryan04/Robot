@@ -26,10 +26,10 @@ inline constexpr float LF_KP = 0.8;        // proportional coefficient
 inline constexpr int LF_THRESHOLD = 1500;  // tape sensing
 
 //Claw constants
-inline constexpr int ARM_UP_ANGLE = 150;
+inline constexpr int ARM_UP_ANGLE = 155;
 inline constexpr int ARM_DOWN_ANGLE = 10;
 inline constexpr int HAND_CLOSE_ANGLE = 3;
-inline constexpr int HAND_OPEN_ANGLE = 69;
+inline constexpr int HAND_OPEN_ANGLE = 90;
 
 // IR Sensor Pins (TBD - fill in once wired)
 inline constexpr int IR_ADC_PIN    = -1;  // analog input; must be an ADC1 pin (GPIO1-10 on the S3)

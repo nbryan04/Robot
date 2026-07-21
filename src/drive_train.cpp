@@ -64,6 +64,18 @@ void Drivetrain::turn(float degrees, float speed) {
     state = Turning;
 }
 
+float Drivetrain::moveProgress() {
+    long total = leftTargetEncoder - leftStartEncoder;
+    if (total < 0) total = -total;
+    if (total == 0) return 1.0f;
+
+    long done = leftMotor.encoder.getCount() - leftStartEncoder;
+    if (done < 0) done = -done;
+
+    float fraction = (float)done / (float)total;
+    return (fraction > 1.0f) ? 1.0f : fraction;
+}
+
 void Drivetrain::update() {
     if (state == Idle) return;
 
@@ -132,7 +144,7 @@ void Drivetrain::update() {
         long leftOvershoot = leftCurrent - leftTargetEncoder;
         long rightOvershoot = rightCurrent - rightTargetEncoder;
 
-        int deadband = 30; // Ticks of acceptable error tolerance
+        int deadband = 40; // Ticks of acceptable error tolerance
         
         bool leftNeedsCorrection = abs(leftOvershoot) > deadband;
         bool rightNeedsCorrection = abs(rightOvershoot) > deadband;
