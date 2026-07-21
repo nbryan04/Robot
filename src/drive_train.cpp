@@ -31,7 +31,7 @@ void Drivetrain::driveStraight(float distanceMM, float speed) {
 }
 
 void Drivetrain::turn(float degrees, float speed) {
-    float trackWidth = 208; // (mm) 
+    float trackWidth = 211.5; // (mm) 
     float turningCircumference = PI * trackWidth;
     
     float distanceMM = turningCircumference * (abs(degrees) / 360.0f);
