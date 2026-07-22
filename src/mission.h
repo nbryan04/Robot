@@ -33,6 +33,13 @@ public:
     enum Phase { COLLECT, PANEL, DONE };
     enum Level { LOWER, UPPER };
 
+    // Where to aim once a rock passes validation.
+    enum AimMode {
+        AIM_CENTROID,       // average of all on-rock sweep samples (robust to lumps)
+        AIM_MIN_DISTANCE,   // angle of the single closest reading
+        AIM_EDGE_MIDPOINT   // midpoint of the two detected edges (original)
+    };
+
     enum State {
         ROUTER,           // n18: dispatch on phase
         // --- collection ---
@@ -80,9 +87,22 @@ public:
     bool enableTeletubbySweep = true;  // false: skip the camera sweep (n5)
     bool enableMetalScan = true;       // false: skip lower/scan/grab (n6-n10,n16)
 
-    // TEST hook: metal detector isn't real yet. 0 = use the real detector.
-    // N (1-based) = force "metal detected" only when scanning rock N.
+    // TEST hook for the metal decision:
+    //   0  = use the real detector
+    //   N  = force "metal" only when scanning rock N (1-based)
+    //  -1  = force every rock to read as a decoy (no metal)
+    // Any non-zero value also skips the real detector's hardware calls.
     int testMetalOnRock = 0;
+
+    // Aim point once a rock is validated (see AimMode). Centroid is most robust
+    // for rough rocks; edge-midpoint is the original; min-distance the nearest bump.
+    AimMode aimMode = AIM_CENTROID;
+
+    // TEST: after centring, drive back to the position the robot arrived at from
+    // the hop (undo the sweep/travel/centre excursion), then hop as normal. Lets
+    // you exercise sweep centring without it disturbing the dead-reckoned path.
+    // Assumes a single sweep pass (SWEEP_PASSES == 1).
+    bool returnAfterCentre = false;
 
     // Mission variables (Init / Variables block of the FSM).
     Phase phase = COLLECT;         // COLLECT / PANEL / DONE
@@ -115,8 +135,11 @@ private:
     int subStep = 0;
     int hopLeg = 0;                // which leg of the current hop we are on
     int centreAttempts = 0;        // distance-correction passes in CENTRE_ROCK
+    int sweepPass = 0;             // sweep+centre passes done at this rock
     float clusterHeading = 0.0f;   // net rotation (deg) added by the sweep/approach
                                    // since the hop finished; undone before the next hop
+    float excursionForward = 0.0f; // net forward distance (mm) driven this excursion
+                                   // (travel + centre); reversed by RETURN_TO_START
     unsigned long stateTimer = 0;
 
     // Per-rock working values.
@@ -125,6 +148,12 @@ private:
     float endEdgeAngle = 0.0f;
     bool foundStartEdge = false;
     bool foundEndEdge = false;
+    float minSweepDistance = 0.0f; // closest valid reading seen during the sweep
+    float minSweepAngle = 0.0f;    // heading at that closest reading
+    int   metalSampleCount = 0;    // confirmation samples taken in SCAN_METAL
+    bool  metalAllAbove = false;   // have all samples so far cleared the threshold
+    float sumOnRockAngle = 0.0f;   // running sum of on-rock sample angles (centroid)
+    long  onRockCount = 0;         // number of on-rock samples in that sum
     float teletubbyBearing = 0.0f; // deg from rock-forward
 
     // ---------------- Temporary tuning values ----------------
@@ -135,35 +164,41 @@ private:
     // every leg turns (deg: + = right/CW, - = left/CCW) then drives (mm).
     // Measured from the PREVIOUS rock so error resets every cluster.
     // HOP_LEG_COUNT says how many legs of each row are actually used.
-    int HOP_LEG_COUNT[6] = {2, 1, 2, 2, 1, 1};  // rock 3 (index 2) uses 2 legs
+    int HOP_LEG_COUNT[6] = {2, 3, 2, 2, 1, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,260},{21, 185} },                 // -> rock 1
-        { {-32.7, 570} },                 // -> rock 2
-        { {42, 250}, {-30, 202} },    // -> rock 3: two legs (turn right, then left)
-        { {-35, 256}, {-30, 240} },                 // -> rock 4
+        { {-45, 275},{45, 365},{-45,0} },                 // -> rock 2
+        { {37, 360}, },    // -> rock 3: two legs (turn right, then left)
+        { {-35, 190}, {-30, 286} },                 // -> rock 4
         { {0, 0} },                 // -> rock 5 (upper deck, after ramp)
         { {0, 0} },                 // -> rock 6 (upper deck)
     };
     float HOP_SPEED = 0.15f;
 
-    float SWEEP_ARC        = 40.0f;  // deg, wide arc to cover drift
+    float SWEEP_ARC        = 45.0f;  // deg, wide arc to cover drift
     float SWEEP_SPEED      = 0.15f;
+    int   SWEEP_PASSES     = 1;      // sweep+centre passes per rock (2 = one refine pass)
     float MIN_ROCK_ANGLE   = 3.0f;    // deg between start/end edges to count as a rock
-    float GRAB_DISTANCE_CM = 13.0f;   // target ultrasonic distance at the rock
+    float GRAB_DISTANCE_CM = 15.0f;   // target ultrasonic distance at the rock
     float CENTRE_MARGIN_CM = 3.0f;    // acceptable +/- error from the target
     float CENTRE_SPEED     = 0.12f;   // slow speed for distance corrections
     unsigned long CENTRE_SETTLE_MS = 250;  // let the filter settle before measuring
-    int CENTRE_MAX_TRIES = 3;         // give up correcting after this many passes
+    int CENTRE_MAX_TRIES = 7;         // give up correcting after this many passes
 
     float TRAVEL_MAX_MM = 500.0f;     // give-up distance driving toward a rock
     float TRAVEL_SPEED  = 0.15f;
 
-    // Metal scan: baseline is taken at hover (clear of the rear metal) via a
-    // fresh recalibrate sample, then we wait for the filter to settle at the
-    // lowered position before reading the shift.
-    unsigned long HOVER_SAMPLE_MS = 500;   // recalibrate sample time at hover
-    unsigned long SCAN_SETTLE_MS  = 1500;  // filter settle at the rock before scan
+    // Metal scan: the baseline is tared at hover (clear of the rear metal) after
+    // letting the frequency filter settle there, then we wait for it to settle
+    // again at the lowered position before reading the shift.
+    unsigned long HOVER_SETTLE_MS = 800;   // filter settle at hover before tare
+    unsigned long SCAN_SETTLE_MS  = 500;   // wait after lowering before sampling
+    // Confirmation: after settling, require this many readings, spaced apart,
+    // to ALL clear the threshold before we grab (rejects the lowering spike).
+    int METAL_SAMPLE_COUNT = 3;
+    unsigned long METAL_SAMPLE_SPACING_MS = 500;
 
+    unsigned long TELETUBBY_SCAN_MS = 5000; // hold still this long for the camera scan
     unsigned long POINT_DWELL_MS = 600; // pause while pointing at a teletubby
 
     // Ramp.

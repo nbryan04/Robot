@@ -43,4 +43,8 @@ struct Drivetrain {
     // Fraction (0..1) of the active driveStraight/turn move completed.
     // Used by the mission FSM to estimate heading during a sweep.
     float moveProgress();
+
+    // Signed distance (mm) the left wheel has travelled since the current move
+    // started. Meaningful for straight moves; for a turn it is the pivot arc.
+    float lastMoveDistanceMM();
 };

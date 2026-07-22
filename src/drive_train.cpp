@@ -76,6 +76,11 @@ float Drivetrain::moveProgress() {
     return (fraction > 1.0f) ? 1.0f : fraction;
 }
 
+float Drivetrain::lastMoveDistanceMM() {
+    long delta = leftMotor.encoder.getCount() - leftStartEncoder;
+    return (float)delta * (robotConfig::WHEEL_1_CIRCUMFERENCE / (float)robotConfig::PULSES_REV);
+}
+
 void Drivetrain::update() {
     if (state == Idle) return;
 
@@ -150,7 +155,7 @@ void Drivetrain::update() {
         bool rightNeedsCorrection = abs(rightOvershoot) > deadband;
 
         if (leftNeedsCorrection || rightNeedsCorrection) {
-            int nudgePWM = 400; 
+            int nudgePWM = 430; 
             
             if (leftNeedsCorrection) {
                 leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;

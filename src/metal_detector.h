@@ -18,7 +18,7 @@ private:
     std::atomic<int> overflow_count{0};
 
     // --- Moving Average Filter ---
-    static const int FILTER_SIZE = 5;
+    static const int FILTER_SIZE = 3;
     float freqBuffer[FILTER_SIZE];
     int bufferIndex = 0;
     float freqSum = 0.0;
@@ -30,7 +30,7 @@ private:
 
 public:
     // Constructor allows you to tune the interval, sensitivity, and PCNT unit.
-    MetalDetector(int pin, unsigned long interval = 500, float thresholdHz = 50.0,
+    MetalDetector(int pin, unsigned long interval = 100, float thresholdHz = 700,
                   pcnt_unit_t unit = PCNT_UNIT_2);
 
     void begin();
