@@ -113,6 +113,14 @@ public:
 
     State state = ROUTER;
 
+    // ---- OLED edge-event debug (updated live during the FIND_ROCK sweep) ----
+    // Every start/end edge the sweep detects (whether or not the accept logic
+    // keeps it) is latched here so the caller (main) can show it on the OLED.
+    // edgeEventSeq bumps on each edge so loop() can tell when a new one fired.
+    Ultrasonic::EdgeEvent lastEdgeEvent = Ultrasonic::NONE;
+    float         lastEdgeDeltaDeg = 0.0f;  // deg from the start of the sweep arc
+    unsigned long edgeEventSeq = 0;         // increments on each detected edge
+
 private:
     void enter(State s);           // transition helper: resets sub-step + timer
     bool driveIdle();              // drivetrain finished its current move
@@ -136,6 +144,8 @@ private:
     int hopLeg = 0;                // which leg of the current hop we are on
     int centreAttempts = 0;        // distance-correction passes in CENTRE_ROCK
     int sweepPass = 0;             // sweep+centre passes done at this rock
+    int approachAttempts = 0;      // sweep->travel tries at this rock (capped so a
+                                   // rock we can't close on doesn't loop forever)
     float clusterHeading = 0.0f;   // net rotation (deg) added by the sweep/approach
                                    // since the hop finished; undone before the next hop
     float excursionForward = 0.0f; // net forward distance (mm) driven this excursion
@@ -169,13 +179,13 @@ private:
         { {0,260},{21, 185} },                 // -> rock 1
         { {-45, 275},{45, 365},{-55,0} },                 // -> rock 2
         { {34, 360}, },    // -> rock 3: two legs (turn right, then left)
-        { {-35, 190}, {-33, 295} },                 // -> rock 4
+        { {-35, 190}, {-30, 295} },                 // -> rock 4
         { {0, 0} },                 // -> rock 5 (upper deck, after ramp)
         { {0, 0} },                 // -> rock 6 (upper deck)
     };
     float HOP_SPEED = 0.15f;
 
-    float SWEEP_ARC        = 45.0f;  // deg, wide arc to cover drift
+    float SWEEP_ARC        = 55.0f;  // deg, wide arc to cover drift
     float SWEEP_SPEED      = 0.15f;
     int   SWEEP_PASSES     = 1;      // sweep+centre passes per rock (2 = one refine pass)
     float MIN_ROCK_ANGLE   = 3.0f;    // deg between start/end edges to count as a rock
@@ -187,6 +197,8 @@ private:
 
     float TRAVEL_MAX_MM = 500.0f;     // give-up distance driving toward a rock
     float TRAVEL_SPEED  = 0.15f;
+    int   APPROACH_MAX_TRIES = 3;     // sweep->travel attempts before abandoning
+                                      // the rock (prevents an endless re-approach)
 
     // Metal scan: the baseline is tared at hover (clear of the rear metal) after
     // letting the frequency filter settle there, then we wait for it to settle

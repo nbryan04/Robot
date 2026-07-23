@@ -24,6 +24,7 @@
 Adafruit_SSD1306 display_handler(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 unsigned long lastDisplayTime = 0;
+unsigned long lastShownEdgeSeq = 0;   // last sweep edge already pushed to the OLED
 
 // ---------------------------------------------------------------------------
 // Pin definitions
@@ -119,10 +120,33 @@ void showUltrasonic() {
     display_handler.display();
 }
 
+// Show the most recent sweep edge (start/end) and how many degrees into the
+// sweep arc it was detected. Called from loop() whenever a new edge fires.
+void showEdgeEvent() {
+    display_handler.clearDisplay();
+    display_handler.setTextColor(SSD1306_WHITE);
+    display_handler.setTextSize(2);
+    display_handler.setCursor(0, 0);
+    if (mission.lastEdgeEvent == Ultrasonic::START_EDGE) {
+        display_handler.println("START");
+    } else if (mission.lastEdgeEvent == Ultrasonic::END_EDGE) {
+        display_handler.println("END");
+    } else {
+        display_handler.println("--");
+    }
+    display_handler.println("edge");
+    display_handler.setTextSize(1);
+    display_handler.setCursor(0, 50);
+    display_handler.print("d = ");
+    display_handler.print(mission.lastEdgeDeltaDeg, 1);
+    display_handler.println(" deg");
+    display_handler.display();
+}
+
 void setup() {
     Serial.begin(115200);
 
-    // oledSetup();  // OLED display disabled for now
+    // oledSetup();  // OLED off for now
     motorLeft.begin();
     motorRight.begin();
     ultrasonic.begin();
@@ -135,9 +159,6 @@ void setup() {
     // Brief pause before the robot starts moving.
     delay(2000);
 
-    // Full-pipeline test: drive the hop path and, at each cluster, run the
-    // ultrasonic FIND_ROCK sweep -> travel -> centre, then the real metal
-    // scan/grab. Camera isn't wired so skip the teletubby sweep.
     // Sweep-centring test: at each rock, sweep -> travel -> centre -> metal
     // scan/grab, then drive back to the post-hop position before the next hop.
     mission.enableRockSearch = true;
@@ -163,6 +184,4 @@ void loop() {
 
     // High-level mission state machine.
     mission.update();
-
-    // OLED debug output disabled for now.
 }

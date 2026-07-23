@@ -107,6 +107,7 @@ void Mission::update() {
                     clusterHeading = 0.0f;
                     excursionForward = 0.0f;
                     sweepPass = 0;  // fresh rock: start the sweep-pass count over
+                    approachAttempts = 0;  // and its re-approach retry count
                     // Tilt cross-check: ramp may show up here.
                     if (level == LOWER && tilt.isOnRamp()) {
                         enter(RAMP_APPROACH);
@@ -154,6 +155,13 @@ void Mission::update() {
             // flicker into one span) and validate by angular width below.
             Ultrasonic::EdgeEvent e = ultra.checkEdgeEvents();
             float h = sweepHeadingDeg(SWEEP_ARC);
+            // Latch EVERY edge (accepted or not) for the OLED debug view: which
+            // edge it was and how many degrees into the sweep arc it fired.
+            if (e == Ultrasonic::START_EDGE || e == Ultrasonic::END_EDGE) {
+                lastEdgeEvent    = e;
+                lastEdgeDeltaDeg = h + SWEEP_ARC / 2.0f;  // deg from sweep start
+                edgeEventSeq++;
+            }
             if (e == Ultrasonic::START_EDGE) {
                 if (!foundStartEdge) {          // keep the first entry
                     foundStartEdge = true;
@@ -235,8 +243,22 @@ void Mission::update() {
                 drive.stop();
                 enter(CENTRE_ROCK);
             } else if (driveIdle()) {
-                // Reached give-up distance without arriving: rock lost.
-                enter(FIND_ROCK);
+                // Reached give-up distance without arriving: rock lost. Bank the
+                // forward distance we just drove so, if this attempt is later
+                // abandoned, ADVANCE_CLUSTER reverses it and the robot returns to
+                // the arrival pose exactly like a found+centred rock (instead of
+                // being left displaced forward).
+                excursionForward += drive.lastMoveDistanceMM();
+                approachAttempts++;
+                if (approachAttempts >= APPROACH_MAX_TRIES) {
+                    // Can't close on this rock (out of range, bad aim, or the
+                    // sensor never reads <= GRAB_DISTANCE_CM). Abandon cleanly via
+                    // ADVANCE_CLUSTER -> realign -> (stopAfterRock) HOLD, instead
+                    // of re-sweeping forever and spiralling in circles.
+                    enter(ADVANCE_CLUSTER);
+                } else {
+                    enter(FIND_ROCK);  // re-sweep and try again
+                }
             }
         }
         break;
