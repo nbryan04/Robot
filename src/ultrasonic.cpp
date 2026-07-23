@@ -122,7 +122,7 @@ Ultrasonic::EdgeEvent Ultrasonic::checkEdgeEvents() {
     if (!historyFull || !newEdgeDataReady) {
         return NONE;
     }
-    
+        
     newEdgeDataReady = false; 
 
     float oldDist = filteredHistory[historyIndex];

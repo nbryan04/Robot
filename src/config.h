@@ -21,8 +21,8 @@ inline constexpr float WHEEL_1_SINGLE_PULSE =
 inline constexpr int PULSES_REV = 5764;
 
 // Line Following Constants
-inline constexpr float LF_KD = 0.95;       // derivative coefficient
-inline constexpr float LF_KP = 0.8;        // proportional coefficient
+inline constexpr float LF_KD = 0.1;       // derivative coefficient
+inline constexpr float LF_KP = 0.06;        // proportional coefficient
 inline constexpr int LF_THRESHOLD = 1500;  // tape sensing
 
 //Claw constants
