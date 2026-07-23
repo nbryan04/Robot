@@ -25,50 +25,70 @@ void TiltSensor::begin() {
 
 void TiltSensor::update() {
     unsigned long now = millis();
-    if (now - _lastRead < READ_INTERVAL_MS) return;
+    
+    // Calculate precise time delta (dt) in seconds for the Gyro integration
+    float dt = (now - _lastRead) / 1000.0f;
+    
+    if (dt < (READ_INTERVAL_MS / 1000.0f)) return;
     _lastRead = now;
 
-    // Point at the accelerometer registers, then burst-read all six bytes.
+    // Point at the accelerometer registers, then burst-read all 14 bytes
+    // (6 Accel + 2 Temp + 6 Gyro)
     Wire.beginTransmission(_addr);
     Wire.write(MPU_ACCEL_XOUT_H);
     if (Wire.endTransmission(false) != 0) return;   // repeated start; bail on error
-    if (Wire.requestFrom(_addr, (uint8_t)6) != 6) return;
+    if (Wire.requestFrom(_addr, (uint8_t)14) != 14) return;
 
-    // Read bytes into named variables: the order of Wire.read() calls inside one
-    // expression is unspecified, so we must sequence them explicitly.
-    uint8_t xh = Wire.read();
-    uint8_t xl = Wire.read();
-    uint8_t yh = Wire.read();
-    uint8_t yl = Wire.read();
-    uint8_t zh = Wire.read();
-    uint8_t zl = Wire.read();
+    // 1. Read Accelerometer Data
+    uint8_t axh = Wire.read(); uint8_t axl = Wire.read();
+    uint8_t ayh = Wire.read(); uint8_t ayl = Wire.read();
+    uint8_t azh = Wire.read(); uint8_t azl = Wire.read();
 
-    int16_t axRaw = (int16_t)((xh << 8) | xl);
-    int16_t ayRaw = (int16_t)((yh << 8) | yl);
-    int16_t azRaw = (int16_t)((zh << 8) | zl);
+    // 2. Read Temperature Data (Discarded, but must be read to advance the buffer)
+    Wire.read(); Wire.read(); 
+
+    // 3. Read Gyroscope Data
+    uint8_t gxh = Wire.read(); uint8_t gxl = Wire.read();
+    uint8_t gyh = Wire.read(); uint8_t gyl = Wire.read();
+    uint8_t gzh = Wire.read(); uint8_t gzl = Wire.read();
+
+    // --- Process Accelerometer ---
+    int16_t axRaw = (int16_t)((axh << 8) | axl);
+    int16_t ayRaw = (int16_t)((ayh << 8) | ayl);
+    int16_t azRaw = (int16_t)((azh << 8) | azl);
 
     float ax = axRaw / ACCEL_LSB_PER_G;
     float ay = ayRaw / ACCEL_LSB_PER_G;
     float az = azRaw / ACCEL_LSB_PER_G;
 
-    // Inclination from horizontal: angle between gravity and the Z axis.
-    // 0 deg when flat, growing as the robot tilts in any direction.
-    float horiz = sqrtf(ax * ax + ay * ay);
-    float angle = atan2f(horiz, fabsf(az)) * 180.0f / (float)PI;
+    // Calculate Pitch from Accelerometer (vulnerable to jolts, immune to drift)
+    // Assuming the X-axis points to the front of the robot.
+    float accelPitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 180.0f / (float)PI;
 
-    // Smooth to reject driving vibration / transient linear acceleration.
+    // --- Process Gyroscope ---
+    int16_t gyRaw = (int16_t)((gyh << 8) | gyl);
+    
+    // Calculate Pitch Rate from Gyro (immune to jolts, vulnerable to drift over time)
+    float gyroRateY = gyRaw / GYRO_LSB_PER_DEG;
+
+    // --- COMPLEMENTARY FILTER ---
     if (!_seeded) {
-        _tiltAngle = angle;
+        // Initial trust entirely in the accelerometer to establish baseline
+        _tiltAngle = accelPitch;
         _seeded = true;
     } else {
-        _tiltAngle = SMOOTHING * angle + (1.0f - SMOOTHING) * _tiltAngle;
+        // Integrate the gyro rate to get the change in angle (gyroRate * dt), 
+        // then fuse it with the absolute accelerometer angle to lock the drift.
+        _tiltAngle = ALPHA * (_tiltAngle + gyroRateY * dt) + (1.0f - ALPHA) * accelPitch;
     }
 
-    // Hysteresis latch: trip on the way up at rampOnAngle, release once we drop
-    // back below rampOffAngle.
-    if (!_onRamp && _tiltAngle >= rampOnAngle) {
+    // --- Hysteresis Latch ---
+    // Using absolute value (fabsf) so it triggers whether going UP or DOWN the ramp
+    float absAngle = fabsf(_tiltAngle);
+    
+    if (!_onRamp && absAngle >= rampOnAngle) {
         _onRamp = true;
-    } else if (_onRamp && _tiltAngle <= rampOffAngle) {
+    } else if (_onRamp && absAngle <= rampOffAngle) {
         _onRamp = false;
     }
 }

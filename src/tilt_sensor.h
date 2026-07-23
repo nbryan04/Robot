@@ -1,45 +1,34 @@
 #pragma once
 #include <Arduino.h>
 
-// MPU-6050 based ramp / tilt detector.
-//
-// Uses the accelerometer to measure the robot's inclination from horizontal.
-// The angle is computed as the tilt of the gravity vector away from the sensor's
-// Z axis, so it is independent of which way the board is mounted in yaw and works
-// whether Z points up or down when the robot is flat.
-//
-// isOnRamp() latches with hysteresis: it becomes true the first time the tilt
-// crosses rampOnAngle (the base of the ramp) and stays true until the tilt drops
-// back below rampOffAngle (off the ramp / crest reached).
-//
-// The MPU-6050 talks I2C (default address 0x68), so it shares the bus with any
-// other I2C device (e.g. the OLED) on the same SDA/SCL pins.
 class TiltSensor {
-public:
-    TiltSensor(int sdaPin, int sclPin, uint8_t address = 0x68);
-
-    void begin();
-    void update();          // read + smooth + latch; call every loop()
-
-    bool isOnRamp();        // latched ramp state (true = on the incline)
-    float getTiltAngle();   // current smoothed tilt from horizontal (deg)
-
-    // ---- Tuning (adjustable) ----
-    float rampOnAngle  = 7.125f;  // deg: detect the base of the ramp
-    float rampOffAngle = 4.0f;    // deg: detect coming off the ramp / crest
-
 private:
-    int _sda;
-    int _scl;
+    int _sda, _scl;
     uint8_t _addr;
 
-    float _tiltAngle = 0.0f;   // smoothed inclination from horizontal (deg)
-    bool  _onRamp = false;     // latched state
-    bool  _seeded = false;     // has the smoother been initialised yet
     unsigned long _lastRead = 0;
+    bool _seeded = false;
+    bool _onRamp = false;
+    float _tiltAngle = 0.0f; 
 
-    // ---- Fixed constants ----
-    static constexpr float SMOOTHING = 0.2f;            // EMA factor on the angle
-    static constexpr float ACCEL_LSB_PER_G = 16384.0f;  // +/-2g full-scale
-    static constexpr unsigned long READ_INTERVAL_MS = 10;
+    // --- Tuning Parameters ---
+    static const unsigned long READ_INTERVAL_MS = 10; 
+    
+    // The Complementary Filter constant (0.0 to 1.0)
+    // 0.98 means: Trust the Gyro 98% (ignores jolts), trust Accel 2% (prevents drift)
+    static constexpr float ALPHA = 0.98f; 
+    
+    static constexpr float ACCEL_LSB_PER_G = 16384.0f; // For +/- 2G range
+    static constexpr float GYRO_LSB_PER_DEG = 131.0f;  // For +/- 250 deg/s range
+
+    // Hysteresis thresholds (in degrees)
+    float rampOnAngle = 10.0f;
+    float rampOffAngle = 5.0f;
+
+public:
+    TiltSensor(int sdaPin, int sclPin, uint8_t address = 0x68);
+    void begin();
+    void update();
+    bool isOnRamp();
+    float getTiltAngle();
 };
