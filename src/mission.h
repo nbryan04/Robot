@@ -167,9 +167,9 @@ private:
     int HOP_LEG_COUNT[6] = {2, 3, 2, 2, 1, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,260},{21, 185} },                 // -> rock 1
-        { {-45, 275},{45, 365},{-45,0} },                 // -> rock 2
-        { {37, 360}, },    // -> rock 3: two legs (turn right, then left)
-        { {-35, 190}, {-30, 286} },                 // -> rock 4
+        { {-45, 275},{45, 365},{-55,0} },                 // -> rock 2
+        { {34, 360}, },    // -> rock 3: two legs (turn right, then left)
+        { {-35, 190}, {-33, 295} },                 // -> rock 4
         { {0, 0} },                 // -> rock 5 (upper deck, after ramp)
         { {0, 0} },                 // -> rock 6 (upper deck)
     };
@@ -198,6 +198,7 @@ private:
     int METAL_SAMPLE_COUNT = 3;
     unsigned long METAL_SAMPLE_SPACING_MS = 500;
 
+    unsigned long CAMERA_PRESCAN_DELAY_MS = 500; // settle before triggering the camera
     unsigned long TELETUBBY_SCAN_MS = 5000; // hold still this long for the camera scan
     unsigned long POINT_DWELL_MS = 600; // pause while pointing at a teletubby
 

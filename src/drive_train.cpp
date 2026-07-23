@@ -155,7 +155,7 @@ void Drivetrain::update() {
         bool rightNeedsCorrection = abs(rightOvershoot) > deadband;
 
         if (leftNeedsCorrection || rightNeedsCorrection) {
-            int nudgePWM = 430; 
+            int nudgePWM = 480; 
             
             if (leftNeedsCorrection) {
                 leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;

@@ -112,6 +112,12 @@ static constexpr unsigned long DOWN_MS  = 400;  // OPENING:    open  -> arm down
 static constexpr unsigned long GRAB_MS  = 400;  // LOWERING:   down  -> close/grab
 static constexpr unsigned long LIFT_MS  = 800;  // LIFTING:    arm up settle
 
+// Store-release jitter: after opening the hand at the top, wiggle the arm a few
+// times to shake the rock free so it drops cleanly into the basket.
+static constexpr int           JITTER_AMP    = 8;   // deg wiggle around ARM_UP
+static constexpr int           JITTER_CYCLES = 3;   // full back-and-forth wiggles
+static constexpr unsigned long JITTER_MS     = 70;  // per half-cycle
+
 void Claw::lowerToHover() {
     actionSeq = ACT_LOWER_HOVER;
     actionStep = 0;
@@ -196,7 +202,8 @@ void Claw::updateAction() {
             }
             break;
 
-        // Store: raise the arm (holding the rock), then open to drop it.
+        // Store: raise the arm (holding the rock), open to drop it, then jitter
+        // the arm to shake the rock free.
         case ACT_STORE:
             if (actionStep == 0) {
                 setAngle(apin, robotConfig::ARM_UP_ANGLE);
@@ -204,9 +211,22 @@ void Claw::updateAction() {
                 actionStepTime = now;
             } else if (actionStep == 1 && now - actionStepTime >= LIFT_MS) {
                 setAngle(hpin, robotConfig::HAND_OPEN_ANGLE);      // release
+                jitterCount = 0;
                 actionStep = 2;
                 actionStepTime = now;
-            } else if (actionStep == 2 && now - actionStepTime >= GRAB_MS) {
+            } else if (actionStep == 2 && now - actionStepTime >= JITTER_MS) {
+                // Wiggle the arm around ARM_UP to knock the rock loose.
+                if (jitterCount < JITTER_CYCLES * 2) {
+                    int amp = (jitterCount % 2 == 0) ? -JITTER_AMP : JITTER_AMP;
+                    setAngle(apin, robotConfig::ARM_UP_ANGLE + amp);
+                    jitterCount++;
+                    actionStepTime = now;
+                } else {
+                    setAngle(apin, robotConfig::ARM_UP_ANGLE);     // settle back
+                    actionStep = 3;
+                    actionStepTime = now;
+                }
+            } else if (actionStep == 3 && now - actionStepTime >= GRAB_MS) {
                 actionSeq = ACT_NONE;
             }
             break;

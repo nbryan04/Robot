@@ -292,18 +292,24 @@ void Mission::update() {
                 enter(NEED_METAL);
                 break;
             }
-            // Rock is aligned: trigger a camera scan and hold still for 2 s to
-            // let it look. The camera link is one-way for now (checkForTeletubby
-            // fires the request and always reports false), so nothing is counted
-            // yet -- the structure is here for when it reports a real result.
-            // (POINT_TELETUBBY / RECENTRE_ROCK below are unused until the camera
-            // can give a bearing to point at.)
-            if (teletubbies < 2 && camera.checkForTeletubby()) {
-                teletubbies += 1;
-            }
+            // Rock is aligned: settle briefly before triggering the camera.
             stateTimer = millis();
             subStep = 1;
-        } else {
+        } else if (subStep == 1) {
+            if (millis() - stateTimer >= CAMERA_PRESCAN_DELAY_MS) {
+                // Trigger a camera scan, then hold still for 2 s to let it look.
+                // The camera link is one-way for now (checkForTeletubby fires the
+                // request and always reports false), so nothing is counted yet --
+                // the structure is here for when it reports a real result.
+                // (POINT_TELETUBBY / RECENTRE_ROCK below are unused until the
+                // camera can give a bearing to point at.)
+                if (teletubbies < 2 && camera.checkForTeletubby()) {
+                    teletubbies += 1;
+                }
+                stateTimer = millis();
+                subStep = 2;
+            }
+        } else {  // subStep == 2: hold for the scan window
             if (millis() - stateTimer >= TELETUBBY_SCAN_MS) {
                 enter(NEED_METAL);
             }

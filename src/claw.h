@@ -45,6 +45,7 @@ public:
     enum ActionSeq { ACT_NONE, ACT_LOWER_HOVER, ACT_LOWER_ROCK, ACT_CLOSE, ACT_STORE, ACT_RAISE };
     ActionSeq actionSeq = ACT_NONE;
     int actionStep = 0;
+    int jitterCount = 0;   // half-cycles done in the store-release jitter
     unsigned long actionStepTime = 0;
     void updateAction();   // called from update() to advance the sequence
 };
