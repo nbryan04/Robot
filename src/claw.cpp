@@ -115,7 +115,7 @@ static constexpr unsigned long LIFT_MS  = 800;  // LIFTING:    arm up settle
 // Store-release jitter: after opening the hand at the top, wiggle the arm a few
 // times to shake the rock free so it drops cleanly into the basket.
 static constexpr int           JITTER_AMP    = 8;   // deg wiggle around ARM_UP
-static constexpr int           JITTER_CYCLES = 3;   // full back-and-forth wiggles
+static constexpr int           JITTER_CYCLES = 0;   // full back-and-forth wiggles (0 = jitter disabled)
 static constexpr unsigned long JITTER_MS     = 70;  // per half-cycle
 
 void Claw::lowerToHover() {
