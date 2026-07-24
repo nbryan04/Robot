@@ -22,8 +22,6 @@ static void IRAM_ATTR pcnt_overflow_isr(void* arg) {
 }
 
 void MetalDetector::begin() {
-    Serial.println("Initializing Hardware Pulse Counter (PCNT)...");
-
     // 1. Configure the PCNT unit + channel: count UP on rising edges only.
     pcnt_config_t cfg = {};
     cfg.pulse_gpio_num = sensorPin;
@@ -54,14 +52,8 @@ void MetalDetector::begin() {
     pcnt_counter_resume(pcntUnit);
 
     // --- Calibration Phase ---
-    Serial.println("Calibrating metal detector... Keep metal away!");
-
     // Take a deep 2-second sample on startup
     recalibrate(2000);
-
-    Serial.print("Base Frequency established: ");
-    Serial.print(baseFrequency);
-    Serial.println(" Hz");
 }
 
 void MetalDetector::update() {

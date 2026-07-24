@@ -201,13 +201,13 @@ private:
     // every leg turns (deg: + = right/CW, - = left/CCW) then drives (mm).
     // Measured from the PREVIOUS rock so error resets every cluster.
     // HOP_LEG_COUNT says how many legs of each row are actually used.
-    int HOP_LEG_COUNT[6] = {2, 3, 2, 2, 1, 1};  // rock 3 (index 2) uses 2 legs
+    int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 1, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,260},{21, 185} },                 // -> rock 1
-        { {-45, 275},{45, 400},{-55,0} },                 // -> rock 2
-        { {34, 360}, },    // -> rock 3: two legs (turn right, then left)
+        { {-45, 275},{45, 400},{-60,10} },                 // -> rock 2
+        { {38, 361}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
-        { {0, 0} },                 // -> rock 5 (upper deck, after ramp)
+        { {-50, 25} , {-40, 150} },                 // -> rock 5 (upper deck, after ramp)
         { {0, 0} },                 // -> rock 6 (upper deck)
     };
     float HOP_SPEED = 0.15f;

@@ -479,7 +479,7 @@ void Mission::update() {
             claw.storeToBasket();
             subStep = 1;
         } else if (!claw.actionBusy()) {
-            rock = 1;
+            rock = 1;   // we now hold the metal rock; later clusters skip the claw
             enter(ADVANCE_CLUSTER);
         }
         break;
