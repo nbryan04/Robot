@@ -58,9 +58,6 @@ public:
         RAISE_CLAW,       // n16: raise claw (decoy)
         ADVANCE_CLUSTER,  // n12: rocks_visited += 1
         ALL_DONE,         // n23: all rocks done? -> maybe phase = PANEL
-        // --- ramp via line following (between the 4th and 5th rock) ---
-        FIND_LINE,        // rotate (negative/CCW) until the LF sees the tape
-        FOLLOW_LINE,      // follow the tape onto the ramp, over it, then stop
         // --- ramp (old dead-reckoned approach; unused now) ---
         RAMP_APPROACH,    // n27: dead-reckon to ramp foot, watch tilt
         RAMP_CLIMB,       // n25: climb until flat (crest)
@@ -167,8 +164,6 @@ private:
     int sweepPass = 0;             // sweep+centre passes done at this rock
     int approachAttempts = 0;      // sweep->travel tries at this rock (capped so a
                                    // rock we can't close on doesn't loop forever)
-    bool rampSeen = false;         // FOLLOW_LINE: have we been on the ramp yet
-                                   // (so we know to stop when we come off it)
     float clusterHeading = 0.0f;   // net rotation (deg) added by the sweep/approach
                                    // since the hop finished; undone before the next hop
     float excursionOriginMM = 0.0f;// both-wheel odometer reading captured at the
@@ -201,13 +196,13 @@ private:
     // every leg turns (deg: + = right/CW, - = left/CCW) then drives (mm).
     // Measured from the PREVIOUS rock so error resets every cluster.
     // HOP_LEG_COUNT says how many legs of each row are actually used.
-    int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 1, 1};  // rock 3 (index 2) uses 2 legs
+    int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 2, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,260},{21, 185} },                 // -> rock 1
         { {-45, 275},{45, 400},{-60,10} },                 // -> rock 2
         { {38, 361}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
-        { {-50, 25} , {-40, 150} },                 // -> rock 5 (upper deck, after ramp)
+        { {-50, 350} , {-54.5, 1500} },                 // -> rock 5 (upper deck, after ramp)
         { {0, 0} },                 // -> rock 6 (upper deck)
     };
     float HOP_SPEED = 0.15f;
@@ -240,12 +235,6 @@ private:
     unsigned long CAMERA_PRESCAN_DELAY_MS = 500; // settle before triggering the camera
     unsigned long TELETUBBY_SCAN_MS = 5000; // hold still this long for the camera scan
     unsigned long POINT_DWELL_MS = 600; // pause while pointing at a teletubby
-
-    // Ramp via line following (FIND_LINE / FOLLOW_LINE). Raw PWM duty (0..MAX_DUTY
-    // = 1023); motors need ~350+ to move at all, more to climb.
-    int LINE_SEEK_PWM = 420;   // in-place rotation speed while hunting for the tape
-    int LINE_BASE_PWM = 600;   // forward speed while following the tape (both wheels)
-    float LINE_RIGHT_SCALE = 1.07f;  // right motor is weaker: scale its PWM up to match
 
     // Ramp (old dead-reckoned approach; unused now).
     float RAMP_APPROACH_MM = 1000.0f;

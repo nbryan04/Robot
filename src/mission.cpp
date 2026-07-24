@@ -74,12 +74,9 @@ void Mission::update() {
         if (idx > 5) idx = 5;  // defensive clamp
 
         if (subStep == 0) {
-            // Counter says the ramp is next (between the 4th and 5th rock):
-            // divert to the line-following ramp climb before hopping.
-            if (level == LOWER && rocks_visited == 4) {
-                enter(FIND_LINE);
-                break;
-            }
+            // The hop to rock 5 (rocks_visited == 4) is hardcoded in HOP_LEGS[4]
+            // and dead-reckoned over the ramp just like any lower-level hop -- no
+            // line following.
             // Start the first leg of the hop path. Skip the turn if it's a
             // zero-angle leg (issuing a 0-magnitude move makes the drivetrain
             // jitter in place instead of finishing).
@@ -552,53 +549,6 @@ void Mission::update() {
         }
         enter(ROUTER);
         break;
-
-    // ---- Rotate to acquire the black tape ---------------------------------
-    // Spin in place in the negative (CCW) direction until any LF sensor sees the
-    // tape, then hand off to FOLLOW_LINE. Motors are driven directly, so the
-    // drivetrain state machine is parked Idle (drive.stop) to keep it out of the
-    // way.
-    case FIND_LINE:
-        if (subStep == 0) {
-            drive.stop();       // park the drivetrain loop; we drive motors directly
-            line.start();       // enable the LF sensor reads
-            rampSeen = false;   // fresh ramp-crossing latch for FOLLOW_LINE
-            subStep = 1;
-        } else {
-            line.update();      // refresh the sensor state
-            if (line.seesLine()) {
-                drive.leftMotor.drive(0, robotConfig::STOPPED);
-                drive.rightMotor.drive(0, robotConfig::STOPPED);
-                enter(FOLLOW_LINE);
-            } else {
-                // Negative / CCW in-place rotation: left wheel back, right wheel fwd.
-                // Right motor is weaker, so scale its PWM up to keep the spin even.
-                drive.leftMotor.drive(LINE_SEEK_PWM, robotConfig::REVERSE);
-                drive.rightMotor.drive((int)(LINE_SEEK_PWM * LINE_RIGHT_SCALE), robotConfig::FORWARD);
-            }
-        }
-        break;
-
-    // ---- Follow the tape onto the ramp and over the crest -----------------
-    // Steer by driving the motors directly from the LF correction. Watch the
-    // tilt: once we've been on the ramp (isOnRamp latched true) and then come off
-    // it (back to false at the crest), stop. Drivetrain stays Idle throughout.
-    case FOLLOW_LINE: {
-        line.update();
-        double corr = line.getCorrection();
-        int leftPWM  = constrain((int)(LINE_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
-        int rightPWM = constrain((int)(LINE_BASE_PWM - corr), 0, robotConfig::MAX_DUTY);
-        drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
-        drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
-
-        if (tilt.isOnRamp()) rampSeen = true;          // on the ramp
-        if (rampSeen && !tilt.isOnRamp()) {            // came off it (crest)
-            drive.stop();
-            line.stop();
-            enter(HOLD);   // stop here for now
-        }
-        break;
-    }
 
     // ---- n27: Approach ramp (old dead-reckoned path; unused) --------------
     case RAMP_APPROACH:
