@@ -9,7 +9,8 @@ private:
     unsigned long _lastRead = 0;
     bool _seeded = false;
     bool _onRamp = false;
-    float _tiltAngle = 0.0f; 
+    bool _present = false;   // MPU-6050 detected on the bus at begin()
+    float _tiltAngle = 0.0f;
 
     // --- Tuning Parameters ---
     static const unsigned long READ_INTERVAL_MS = 10; 
@@ -22,7 +23,7 @@ private:
     static constexpr float GYRO_LSB_PER_DEG = 131.0f;  // For +/- 250 deg/s range
 
     // Hysteresis thresholds (in degrees)
-    float rampOnAngle = 10.0f;
+    float rampOnAngle = 7.0f;
     float rampOffAngle = 5.0f;
 
 public:
@@ -31,4 +32,5 @@ public:
     void update();
     bool isOnRamp();
     float getTiltAngle();
+    bool isPresent();   // did the MPU-6050 ACK at begin()?
 };

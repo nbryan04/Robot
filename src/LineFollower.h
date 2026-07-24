@@ -14,6 +14,7 @@ private:
     
     double currentCorrection = 0.0;
     bool active = false;
+    bool onLine = false;   // did the last sensor read see the tape at all
 
 public:
     LineFollower(int lSensorPin, int mSensorPin, int rSensorPin);
@@ -25,4 +26,5 @@ public:
     
     double getCorrection();
     bool isFollowing();
+    bool seesLine();   // true if any sensor is currently over the tape
 };

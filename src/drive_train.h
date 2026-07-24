@@ -47,4 +47,11 @@ struct Drivetrain {
     // Signed distance (mm) the left wheel has travelled since the current move
     // started. Meaningful for straight moves; for a turn it is the pivot arc.
     float lastMoveDistanceMM();
+
+    // Absolute forward (centre-line) odometer in mm, averaged over BOTH wheels.
+    // A turn spins the wheels equal-and-opposite, so it cancels in the average
+    // and only real forward/back translation accumulates. Snapshot it, drive
+    // (including turns), read it again: the difference is net forward distance --
+    // exactly what the mission reverses to realign after a sweep/centre.
+    float forwardOdometryMM();
 };

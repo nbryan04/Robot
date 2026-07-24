@@ -24,7 +24,7 @@
 Adafruit_SSD1306 display_handler(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 unsigned long lastDisplayTime = 0;
-unsigned long lastShownEdgeSeq = 0;   // last sweep edge already pushed to the OLED
+unsigned long lastShownSweepSeq = 0;   // last sweep result already drawn to the OLED
 
 // ---------------------------------------------------------------------------
 // Pin definitions
@@ -47,11 +47,11 @@ const int CAMERA_OUT_PIN    = -1;  // camera -> ESP (detection result)
 const int CLAW_HAND_PIN     = 16;
 const int CLAW_ARM_PIN      = 15;
 const int METAL_PIN         = 17;
-const int IMU_SDA_PIN       = 6;   // MPU-6050 shares the I2C bus (SDA)
-const int IMU_SCL_PIN       = 5;   // MPU-6050 shares the I2C bus (SCL)
-const int LF_LEFT_PIN       = -1;
-const int LF_MID_PIN        = -1;
-const int LF_RIGHT_PIN      = -1;
+const int IMU_SDA_PIN       = 5;   // MPU-6050 shares the I2C bus (SDA)
+const int IMU_SCL_PIN       = 6;   // MPU-6050 shares the I2C bus (SCL)
+const int LF_LEFT_PIN       = 7;
+const int LF_MID_PIN        = 8;
+const int LF_RIGHT_PIN      = 9;
 
 // ---------------------------------------------------------------------------
 // Object instantiation
@@ -143,10 +143,37 @@ void showEdgeEvent() {
     display_handler.display();
 }
 
+// Show the finished sweep's result: the start/end edge angles and the distance
+// the robot thinks the rock is at. Drawn once per sweep and left on screen.
+void showSweepResult() {
+    display_handler.clearDisplay();
+    display_handler.setTextColor(SSD1306_WHITE);
+    display_handler.setTextSize(1);
+    display_handler.setCursor(0, 0);
+    display_handler.println(mission.sweepFound ? "ROCK FOUND" : "NO ROCK");
+
+    display_handler.setCursor(0, 18);
+    display_handler.print("Start: ");
+    display_handler.print(mission.sweepStartAngle, 1);
+    display_handler.println(" deg");
+
+    display_handler.setCursor(0, 32);
+    display_handler.print("End:   ");
+    display_handler.print(mission.sweepEndAngle, 1);
+    display_handler.println(" deg");
+
+    display_handler.setCursor(0, 46);
+    display_handler.print("Dist:  ");
+    display_handler.print(mission.sweepDistanceCm, 1);
+    display_handler.println(" cm");
+
+    display_handler.display();
+}
+
 void setup() {
     Serial.begin(115200);
 
-    // oledSetup();  // OLED off for now
+    // oledSetup();  // OLED off; sweep result goes to serial instead
     motorLeft.begin();
     motorRight.begin();
     ultrasonic.begin();
@@ -154,19 +181,20 @@ void setup() {
     claw.begin();
     metalDetector.begin();
     tiltSensor.begin();
+    Serial.println(tiltSensor.isPresent() ? "MPU: present" : "MPU: NOT FOUND (tilt will read 0.0)");
     lineFollower.begin();
 
     // Brief pause before the robot starts moving.
     delay(2000);
 
-    // Sweep-centring test: at each rock, sweep -> travel -> centre -> metal
-    // scan/grab, then drive back to the post-hop position before the next hop.
-    mission.enableRockSearch = true;
+    // Sweep + centring disabled for now (line-following ramp focus): hop between
+    // clusters without the ultrasonic search, and skip the post-centre realign.
+    mission.enableRockSearch = false;  // no FIND_ROCK sweep / travel / centre
     mission.enableTeletubbySweep = true;   // 2s camera scan once aligned on the rock
     mission.enableMetalScan = true;    // run the claw lower/scan/grab at each rock
     mission.testMetalOnRock = 0;       // 0 = use the real detector
-    mission.aimMode = Mission::AIM_CENTROID;  // centroid of on-rock sweep samples
-    mission.returnAfterCentre = true;         // return home after centring
+    mission.aimMode = Mission::AIM_EDGE_MIDPOINT;  // aim at the midpoint of the two edges
+    mission.returnAfterCentre = false;        // no realignment (nothing to undo)
 
     mission.begin();
 }
@@ -184,4 +212,26 @@ void loop() {
 
     // High-level mission state machine.
     mission.update();
+
+    // Serial: when a sweep finishes, print its result once (start/end edge
+    // angles + the distance the robot thinks the rock is at).
+    if (mission.sweepResultSeq != lastShownSweepSeq) {
+        lastShownSweepSeq = mission.sweepResultSeq;
+        Serial.println(mission.sweepFound ? "ROCK FOUND" : "NO ROCK");
+        Serial.print("  Start: "); Serial.print(mission.sweepStartAngle, 1); Serial.println(" deg");
+        Serial.print("  End:   "); Serial.print(mission.sweepEndAngle, 1);   Serial.println(" deg");
+        Serial.print("  Dist:  "); Serial.print(mission.sweepDistanceCm, 1); Serial.println(" cm");
+    }
+
+    // Serial: while hunting for / following the tape onto the ramp, log tilt and
+    // the LF correction (throttled) so LF_KP and the ramp trigger can be tuned.
+    if ((mission.state == Mission::FIND_LINE || mission.state == Mission::FOLLOW_LINE)
+        && millis() - lastDisplayTime >= 200) {
+        lastDisplayTime = millis();
+        Serial.print(mission.state == Mission::FIND_LINE ? "FIND_LINE   " : "FOLLOW_LINE ");
+        Serial.print("tilt=");    Serial.print(tiltSensor.getTiltAngle(), 1);
+        Serial.print(" onRamp="); Serial.print(tiltSensor.isOnRamp() ? "Y" : "n");
+        Serial.print(" sees=");   Serial.print(lineFollower.seesLine() ? "Y" : "n");
+        Serial.print(" corr=");   Serial.println(lineFollower.getCorrection(), 2);
+    }
 }

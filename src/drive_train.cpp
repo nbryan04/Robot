@@ -81,6 +81,16 @@ float Drivetrain::lastMoveDistanceMM() {
     return (float)delta * (robotConfig::WHEEL_1_CIRCUMFERENCE / (float)robotConfig::PULSES_REV);
 }
 
+float Drivetrain::forwardOdometryMM() {
+    // Average both wheels: on a straight move both counts climb together; on a
+    // turn one climbs while the other drops, so the average stays put. What is
+    // left is pure forward/back translation of the robot's centre.
+    long left  = (long)leftMotor.encoder.getCount();
+    long right = (long)rightMotor.encoder.getCount();
+    double avgTicks = (left + right) / 2.0;
+    return (float)(avgTicks * (robotConfig::WHEEL_1_CIRCUMFERENCE / (double)robotConfig::PULSES_REV));
+}
+
 void Drivetrain::update() {
     if (state == Idle) return;
 

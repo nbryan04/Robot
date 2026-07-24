@@ -13,6 +13,13 @@ void TiltSensor::begin() {
     Wire.begin(_sda, _scl);
     Wire.setClock(400000);
 
+    // Probe for the MPU-6050 first. If it doesn't ACK (not wired, wrong pins,
+    // etc.) mark it absent and never touch the bus again -- otherwise update()
+    // spams i2cWriteReadNonStop errors on every read.
+    Wire.beginTransmission(_addr);
+    _present = (Wire.endTransmission() == 0);
+    if (!_present) return;
+
     // Wake the MPU-6050: clear the sleep bit in PWR_MGMT_1.
     Wire.beginTransmission(_addr);
     Wire.write(MPU_PWR_MGMT_1);
@@ -24,8 +31,10 @@ void TiltSensor::begin() {
 }
 
 void TiltSensor::update() {
+    if (!_present) return;   // no MPU on the bus: stay silent
+
     unsigned long now = millis();
-    
+
     // Calculate precise time delta (dt) in seconds for the Gyro integration
     float dt = (now - _lastRead) / 1000.0f;
     
@@ -99,4 +108,8 @@ bool TiltSensor::isOnRamp() {
 
 float TiltSensor::getTiltAngle() {
     return _tiltAngle;
+}
+
+bool TiltSensor::isPresent() {
+    return _present;
 }

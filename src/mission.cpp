@@ -6,6 +6,10 @@ Mission::Mission(Drivetrain& dt, Ultrasonic& us, Camera& cam, Claw& cl,
       metal(md), tilt(ts), line(lf) {}
 
 void Mission::begin() {
+    // Baseline the forward odometer at the spawn pose. A normal run re-baselines
+    // at each cluster arrival (HOP_TO_CLUSTER); the at-rock test skips the hop, so
+    // this spawn baseline is what its realignment measures against.
+    excursionOriginMM = drive.forwardOdometryMM();
     enter(ROUTER);
 }
 
@@ -70,9 +74,10 @@ void Mission::update() {
         if (idx > 5) idx = 5;  // defensive clamp
 
         if (subStep == 0) {
-            // Counter says the ramp is next: divert before hopping.
+            // Counter says the ramp is next (between the 4th and 5th rock):
+            // divert to the line-following ramp climb before hopping.
             if (level == LOWER && rocks_visited == 4) {
-                enter(RAMP_APPROACH);
+                enter(FIND_LINE);
                 break;
             }
             // Start the first leg of the hop path. Skip the turn if it's a
@@ -105,7 +110,7 @@ void Mission::update() {
                     // Whole path done: this arrival heading is the reference the
                     // next hop is measured from. Start tracking excursion rotation.
                     clusterHeading = 0.0f;
-                    excursionForward = 0.0f;
+                    excursionOriginMM = drive.forwardOdometryMM();  // arrival baseline
                     sweepPass = 0;  // fresh rock: start the sweep-pass count over
                     approachAttempts = 0;  // and its re-approach retry count
                     // Tilt cross-check: ramp may show up here.
@@ -196,6 +201,14 @@ void Mission::update() {
                 float rockWidth = endEdgeAngle - startEdgeAngle;
                 if (rockWidth < 0) rockWidth = -rockWidth;
 
+                // Publish the sweep result for the OLED summary (angles as deg
+                // into the sweep arc; distance = closest reading seen).
+                sweepFound = (foundStartEdge && foundEndEdge && rockWidth >= MIN_ROCK_ANGLE);
+                sweepStartAngle = startEdgeAngle + SWEEP_ARC / 2.0f;
+                sweepEndAngle   = endEdgeAngle + SWEEP_ARC / 2.0f;
+                sweepDistanceCm = minSweepDistance;
+                sweepResultSeq++;
+
                 if (foundStartEdge && foundEndEdge && rockWidth >= MIN_ROCK_ANGLE) {
                     float edgeMidpoint = (startEdgeAngle + endEdgeAngle) / 2.0f;
                     switch (aimMode) {
@@ -239,16 +252,13 @@ void Mission::update() {
             float d = ultra.filteredDistanceCm;
             bool valid = (d > 0 && d < Ultrasonic::MAX_VALID_DISTANCE);
             if (valid && d <= GRAB_DISTANCE_CM) {
-                excursionForward += drive.lastMoveDistanceMM();  // actual travel
                 drive.stop();
                 enter(CENTRE_ROCK);
             } else if (driveIdle()) {
-                // Reached give-up distance without arriving: rock lost. Bank the
-                // forward distance we just drove so, if this attempt is later
-                // abandoned, ADVANCE_CLUSTER reverses it and the robot returns to
-                // the arrival pose exactly like a found+centred rock (instead of
-                // being left displaced forward).
-                excursionForward += drive.lastMoveDistanceMM();
+                // Reached give-up distance without arriving: rock lost. The
+                // forward odometer already captured this leg, so if the attempt
+                // is later abandoned ADVANCE_CLUSTER reverses it and the robot
+                // returns to the arrival pose. Just count the try and re-sweep.
                 approachAttempts++;
                 if (approachAttempts >= APPROACH_MAX_TRIES) {
                     // Can't close on this rock (out of range, bad aim, or the
@@ -301,7 +311,8 @@ void Mission::update() {
             }
         } else {  // subStep == 2: wait for the correction move, then re-measure
             if (driveIdle()) {
-                excursionForward += drive.lastMoveDistanceMM();  // this correction
+                // No manual banking: the forward odometer already accounts for
+                // this correction move (and every one before it).
                 subStep = 0;
             }
         }
@@ -488,6 +499,11 @@ void Mission::update() {
         // subStep 2-3: undo the net rotation the sweep/approach added, so the
         //   next hop is measured from the heading we ARRIVED with.
         if (subStep == 0) {
+            // Net forward distance since arriving at this rock, read straight from
+            // both encoders: the sweep turns cancel in the average, leaving only
+            // the travel + centring translation. Reverse it to land back at the
+            // arrival pose.
+            excursionForward = drive.forwardOdometryMM() - excursionOriginMM;
             if (returnAfterCentre && fabs(excursionForward) > 1.0f) {
                 drive.driveStraight(-excursionForward, TRAVEL_SPEED);
                 subStep = 1;
@@ -502,13 +518,25 @@ void Mission::update() {
                 clusterHeading = 0.0f;
                 subStep = 3;
             } else {
-                rocks_visited += 1;
-                enter(ALL_DONE);
+                // Realigned to the arrival pose. In the at-rock test, hold here;
+                // otherwise count the rock and move on to the next cluster.
+                if (stopAfterRock) {
+                    enter(HOLD);
+                } else {
+                    rocks_visited += 1;
+                    enter(ALL_DONE);
+                }
             }
         } else {  // subStep == 3
             if (driveIdle()) {
-                rocks_visited += 1;
-                enter(ALL_DONE);
+                // Realigned to the arrival pose. In the at-rock test, hold here;
+                // otherwise count the rock and move on to the next cluster.
+                if (stopAfterRock) {
+                    enter(HOLD);
+                } else {
+                    rocks_visited += 1;
+                    enter(ALL_DONE);
+                }
             }
         }
         break;
@@ -521,7 +549,54 @@ void Mission::update() {
         enter(ROUTER);
         break;
 
-    // ---- n27: Approach ramp -----------------------------------------------
+    // ---- Rotate to acquire the black tape ---------------------------------
+    // Spin in place in the negative (CCW) direction until any LF sensor sees the
+    // tape, then hand off to FOLLOW_LINE. Motors are driven directly, so the
+    // drivetrain state machine is parked Idle (drive.stop) to keep it out of the
+    // way.
+    case FIND_LINE:
+        if (subStep == 0) {
+            drive.stop();       // park the drivetrain loop; we drive motors directly
+            line.start();       // enable the LF sensor reads
+            rampSeen = false;   // fresh ramp-crossing latch for FOLLOW_LINE
+            subStep = 1;
+        } else {
+            line.update();      // refresh the sensor state
+            if (line.seesLine()) {
+                drive.leftMotor.drive(0, robotConfig::STOPPED);
+                drive.rightMotor.drive(0, robotConfig::STOPPED);
+                enter(FOLLOW_LINE);
+            } else {
+                // Negative / CCW in-place rotation: left wheel back, right wheel fwd.
+                // Right motor is weaker, so scale its PWM up to keep the spin even.
+                drive.leftMotor.drive(LINE_SEEK_PWM, robotConfig::REVERSE);
+                drive.rightMotor.drive((int)(LINE_SEEK_PWM * LINE_RIGHT_SCALE), robotConfig::FORWARD);
+            }
+        }
+        break;
+
+    // ---- Follow the tape onto the ramp and over the crest -----------------
+    // Steer by driving the motors directly from the LF correction. Watch the
+    // tilt: once we've been on the ramp (isOnRamp latched true) and then come off
+    // it (back to false at the crest), stop. Drivetrain stays Idle throughout.
+    case FOLLOW_LINE: {
+        line.update();
+        double corr = line.getCorrection();
+        int leftPWM  = constrain((int)(LINE_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
+        int rightPWM = constrain((int)(LINE_BASE_PWM - corr), 0, robotConfig::MAX_DUTY);
+        drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
+        drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
+
+        if (tilt.isOnRamp()) rampSeen = true;          // on the ramp
+        if (rampSeen && !tilt.isOnRamp()) {            // came off it (crest)
+            drive.stop();
+            line.stop();
+            enter(HOLD);   // stop here for now
+        }
+        break;
+    }
+
+    // ---- n27: Approach ramp (old dead-reckoned path; unused) --------------
     case RAMP_APPROACH:
         if (subStep == 0) {
             drive.driveStraight(RAMP_APPROACH_MM, RAMP_SPEED);

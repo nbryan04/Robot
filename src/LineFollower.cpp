@@ -42,6 +42,9 @@ void LineFollower::update() {
         bool midVal = analogRead(mPin) > robotConfig::LF_THRESHOLD;
         bool rightVal = analogRead(rPin) > robotConfig::LF_THRESHOLD;
 
+        // Any sensor over the tape means we've found / are on the line.
+        onLine = (leftVal || midVal || rightVal);
+
         if (!leftVal && midVal && !rightVal) {
             error = 0;
         } else if (leftVal && midVal && !rightVal) {
@@ -62,10 +65,16 @@ void LineFollower::update() {
             lastError = error;
         } 
 
-        currentCorrection = robotConfig::LF_KP * error + robotConfig::LF_KD * (error - recentError);
+        // Scale the PD output by 1024 (full PWM duty range) so the fractional
+        // LF_KP/LF_KD gains land in motor-PWM units for direct driving.
+        currentCorrection = 1024.0 * (robotConfig::LF_KP * error + robotConfig::LF_KD * (error - recentError));
     }
 }
 
 double LineFollower::getCorrection() {
     return currentCorrection;
+}
+
+bool LineFollower::seesLine() {
+    return onLine;
 }
