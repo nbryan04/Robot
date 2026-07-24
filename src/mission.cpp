@@ -118,9 +118,12 @@ void Mission::update() {
                         enter(RAMP_APPROACH);
                     } else if (enableRockSearch) {
                         enter(FIND_ROCK);
-                    } else if (enableMetalScan) {
-                        // No search, but still run the claw sequence at the rock.
-                        enter(NEED_METAL);
+                    } else if (enableMetalScan || enableTeletubbySweep) {
+                        // No search/centre, but still run the camera scan (if
+                        // enabled) BEFORE lowering the claw. TELETUBBY_SWEEP
+                        // self-bypasses to NEED_METAL when the camera is off, and
+                        // NEED_METAL skips the claw when metal scan is off.
+                        enter(TELETUBBY_SWEEP);
                     } else {
                         enter(ADVANCE_CLUSTER);  // nav-only: skip the search
                     }
