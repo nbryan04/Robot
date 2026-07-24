@@ -113,10 +113,11 @@ void Mission::update() {
                     excursionOriginMM = drive.forwardOdometryMM();  // arrival baseline
                     sweepPass = 0;  // fresh rock: start the sweep-pass count over
                     approachAttempts = 0;  // and its re-approach retry count
-                    // Tilt cross-check: ramp may show up here.
-                    if (level == LOWER && tilt.isOnRamp()) {
-                        enter(RAMP_APPROACH);
-                    } else if (enableRockSearch) {
+                    // NOTE: no tilt->ramp cross-check here. The ramp is entered
+                    // deliberately at rocks_visited==4 (subStep 0 -> FIND_LINE), so
+                    // a stray isOnRamp() latch (e.g. a grab/turn jolt spiking the
+                    // gyro-fused tilt) must NOT divert us mid-collection.
+                    if (enableRockSearch) {
                         enter(FIND_ROCK);
                     } else if (enableMetalScan || enableTeletubbySweep) {
                         // No search/centre, but still run the camera scan (if
