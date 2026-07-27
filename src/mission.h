@@ -204,8 +204,8 @@ private:
     int HOP_LEG_COUNT[6] = {2, 3, 2, 2, 1, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,260},{21, 185} },                 // -> rock 1
-        { {-45, 275},{45, 400},{-55,0} },                 // -> rock 2
-        { {34, 360}, },    // -> rock 3: two legs (turn right, then left)
+        { {-45 , 275},{45, 400},{-60,10} },                 // -> rock 2
+        { {38, 361} },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
         { {0, 0} },                 // -> rock 5 (upper deck, after ramp)
         { {0, 0} },                 // -> rock 6 (upper deck)
