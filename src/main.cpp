@@ -23,8 +23,6 @@
 #define OLED_RESET -1
 Adafruit_SSD1306 display_handler(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-unsigned long lastDisplayTime = 0;
-unsigned long lastShownSweepSeq = 0;   // last sweep result already drawn to the OLED
 
 // ---------------------------------------------------------------------------
 // Pin definitions
@@ -171,9 +169,7 @@ void showSweepResult() {
 }
 
 void setup() {
-    Serial.begin(115200);
-
-    // oledSetup();  // OLED off; sweep result goes to serial instead
+    // oledSetup();  // OLED off
     motorLeft.begin();
     motorRight.begin();
     ultrasonic.begin();
@@ -181,7 +177,6 @@ void setup() {
     claw.begin();
     metalDetector.begin();
     tiltSensor.begin();
-    Serial.println(tiltSensor.isPresent() ? "MPU: present" : "MPU: NOT FOUND (tilt will read 0.0)");
     lineFollower.begin();
 
     // Brief pause before the robot starts moving.
@@ -212,26 +207,4 @@ void loop() {
 
     // High-level mission state machine.
     mission.update();
-
-    // Serial: when a sweep finishes, print its result once (start/end edge
-    // angles + the distance the robot thinks the rock is at).
-    if (mission.sweepResultSeq != lastShownSweepSeq) {
-        lastShownSweepSeq = mission.sweepResultSeq;
-        Serial.println(mission.sweepFound ? "ROCK FOUND" : "NO ROCK");
-        Serial.print("  Start: "); Serial.print(mission.sweepStartAngle, 1); Serial.println(" deg");
-        Serial.print("  End:   "); Serial.print(mission.sweepEndAngle, 1);   Serial.println(" deg");
-        Serial.print("  Dist:  "); Serial.print(mission.sweepDistanceCm, 1); Serial.println(" cm");
-    }
-
-    // Serial: while hunting for / following the tape onto the ramp, log tilt and
-    // the LF correction (throttled) so LF_KP and the ramp trigger can be tuned.
-    if ((mission.state == Mission::FIND_LINE || mission.state == Mission::FOLLOW_LINE)
-        && millis() - lastDisplayTime >= 200) {
-        lastDisplayTime = millis();
-        Serial.print(mission.state == Mission::FIND_LINE ? "FIND_LINE   " : "FOLLOW_LINE ");
-        Serial.print("tilt=");    Serial.print(tiltSensor.getTiltAngle(), 1);
-        Serial.print(" onRamp="); Serial.print(tiltSensor.isOnRamp() ? "Y" : "n");
-        Serial.print(" sees=");   Serial.print(lineFollower.seesLine() ? "Y" : "n");
-        Serial.print(" corr=");   Serial.println(lineFollower.getCorrection(), 2);
-    }
 }
