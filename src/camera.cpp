@@ -28,15 +28,12 @@ bool Camera::checkForTeletubby() {
         long currentTime = millis();
         while (millis() - currentTime < 3000) {
             if (Communications::hasNewMessage()) {
-		Serial.println("Message received from camera");
+		Serial.println("Message received from camera"); //debugging statements
 		Serial.print("Teletubby found:");
 		Serial.println(Communications::teletubbyFound());
                 return Communications::teletubbyFound();
             }
         }
-    } else {
-        return false;
     }
-
-    return false;  // placeholder since we only have 1-way communication.
+    return false;
 }
