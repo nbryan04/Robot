@@ -141,12 +141,7 @@ void Drivetrain::update() {
             leftMotor.drive(0, robotConfig::STOPPED);
             rightMotor.drive(0, robotConfig::STOPPED);
             
-            // --- NEW: Flag to indicate we need to settle ---
-            // We are done with targetSpeed for the main move, so we set it to 0 
-            // here to flag the Braking state that we need to wait for a stop.
-            targetSpeed = 0.0f; 
-            // -----------------------------------------------
-            
+            targetSpeed = 0.0f; // Flag for settling check
             state = Braking; 
         }
     }
@@ -156,43 +151,57 @@ void Drivetrain::update() {
     // ---------------------------------------------------------
     else if (state == Braking) {
         
-        // --- THE FIX: ONE-TIME SETTLING CHECK ---
-        // If targetSpeed is 0.0, we just transitioned from State 1 and are still coasting.
+        // ONE-TIME SETTLING CHECK
         if (targetSpeed == 0.0f) {
             float settleSpeedThreshold = 0.03f;
-            
-            // If still sliding, exit the loop and wait.
             if (abs(leftMotor.speed()) > settleSpeedThreshold || abs(rightMotor.speed()) > settleSpeedThreshold) {
                 return; 
             }
-            
-            // Once settled, change the flag to -1.0 so we bypass this check 
-            // entirely on the next loop, allowing the nudge to run smoothly!
             targetSpeed = -1.0f; 
         }
-        // ----------------------------------------
+
+        // --- INFER MOVE TYPE (No header changes required) ---
+        long expectedLeftDelta = leftTargetEncoder - leftStartEncoder;
+        long expectedRightDelta = rightTargetEncoder - rightStartEncoder;
+        // If one target went up and the other went down, it was a turn.
+        bool wasTurnMove = ((expectedLeftDelta > 0) != (expectedRightDelta > 0));
+
+        // ==========================================
+        // CONFIGURABLE BRAKING PARAMETERS
+        // ==========================================
+        // Straight adjustments
+        int straightDeadband = 40;
+        int straightNudgePWM = 380;
+        float straightRightMultiplier = 1.09f;
+        
+        // Turn adjustments
+        int turnDeadband = 40;
+        int turnNudgePWM = 480;
+        float turnRightMultiplier = 1.07f;
+        // ==========================================
+
+        int activeDeadband = wasTurnMove ? turnDeadband : straightDeadband;
+        int activeNudgePWM = wasTurnMove ? turnNudgePWM : straightNudgePWM;
+        float activeRightMultiplier = wasTurnMove ? turnRightMultiplier : straightRightMultiplier;
 
         long leftOvershoot = leftCurrent - leftTargetEncoder;
         long rightOvershoot = rightCurrent - rightTargetEncoder;
-
-        int deadband = 40; 
         
-        bool leftNeedsCorrection = abs(leftOvershoot) > deadband;
-        bool rightNeedsCorrection = abs(rightOvershoot) > deadband;
+        bool leftNeedsCorrection = abs(leftOvershoot) > activeDeadband;
+        bool rightNeedsCorrection = abs(rightOvershoot) > activeDeadband;
 
         if (leftNeedsCorrection || rightNeedsCorrection) {
-            int nudgePWM = 480; 
             
             if (leftNeedsCorrection) {
                 leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
-                leftMotor.drive(nudgePWM, leftDriveDirection);
+                leftMotor.drive(activeNudgePWM, leftDriveDirection);
             } else {
                 leftMotor.drive(0, robotConfig::STOPPED);
             }
 
             if (rightNeedsCorrection) {
                 rightDriveDirection = (rightOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
-                rightMotor.drive((int)(nudgePWM * 1.07f), rightDriveDirection);
+                rightMotor.drive((int)(activeNudgePWM * activeRightMultiplier), rightDriveDirection);
             } else {
                 rightMotor.drive(0, robotConfig::STOPPED);
             }
