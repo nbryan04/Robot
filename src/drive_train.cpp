@@ -171,7 +171,7 @@ void Drivetrain::update() {
         // ==========================================
         // Straight adjustments
         int straightDeadband = 40;
-        int straightNudgePWM = 380;
+        int straightNudgePWM = 420;
         float straightRightMultiplier = 1.09f;
         
         // Turn adjustments

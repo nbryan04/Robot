@@ -111,7 +111,7 @@ public:
     // TEMP TEST: stop and hold at the ramp crest instead of starting the hop to
     // rock 5, so the crest detection can be checked in isolation. Set false to
     // resume the normal flow (crest -> HOP_LEGS[4]).
-    bool pauseAtCrest = true;
+    bool pauseAtCrest = false;
 
     // TEST hook for the metal decision:
     //   0  = use the real detector
@@ -241,11 +241,11 @@ private:
     int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 2, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,260},{21, 185} },                 // -> rock 1
-        { {-45, 275},{45, 400},{-60,10} },                 // -> rock 2
-        { {37, 361}, },    // -> rock 3: two legs (turn right, then left)
+        { {-45, 275},{45, 400},{-63,10} },                 // -> rock 2
+        { {37, 355}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
-        { {-20, 250} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
-        { {100, 300} },                 // -> rock 6 (upper deck)
+        { {0, 160} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
+        { {90, 120} },                 // -> rock 6 (upper deck)
     };
     float HOP_TURN_SPEED  = 0.15;   // speed for the in-place turn portion of a hop leg
     float HOP_DRIVE_SPEED = 0.20;   // speed for the drive-straight portion of a hop leg

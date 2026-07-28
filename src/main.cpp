@@ -196,7 +196,7 @@ void setup() {
     // rocks 1-3 hop straight into the scan. Indices are 0-based (rock1..rock6).
     mission.sweepOnRock[0] = false;  // rock 1
     mission.sweepOnRock[1] = false;  // rock 2
-    mission.sweepOnRock[2] = false;  // rock 3
+    mission.sweepOnRock[2] = true;   // rock 3
     mission.sweepOnRock[3] = true;   // rock 4
     mission.sweepOnRock[4] = true;   // rock 5
     mission.sweepOnRock[5] = true;   // rock 6
