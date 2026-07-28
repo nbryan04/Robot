@@ -11,11 +11,9 @@ TiltSensor::TiltSensor(int sdaPin, int sclPin, uint8_t address)
 
 void TiltSensor::begin() {
     Wire.begin(_sda, _scl);
-    Wire.setClock(400000);
+    Wire.setClock(100000); // Kept at 100kHz for JST connector stability!
 
-    // Probe for the MPU-6050 first. If it doesn't ACK (not wired, wrong pins,
-    // etc.) mark it absent and never touch the bus again -- otherwise update()
-    // spams i2cWriteReadNonStop errors on every read.
+    // Probe for the MPU-6050 first. 
     Wire.beginTransmission(_addr);
     _present = (Wire.endTransmission() == 0);
     if (!_present) return;
@@ -41,8 +39,6 @@ void TiltSensor::update() {
     if (dt < (READ_INTERVAL_MS / 1000.0f)) return;
     _lastRead = now;
 
-    // Point at the accelerometer registers, then burst-read all 14 bytes
-    // (6 Accel + 2 Temp + 6 Gyro)
     Wire.beginTransmission(_addr);
     Wire.write(MPU_ACCEL_XOUT_H);
     if (Wire.endTransmission(false) != 0) return;   // repeated start; bail on error
@@ -70,29 +66,26 @@ void TiltSensor::update() {
     float ay = ayRaw / ACCEL_LSB_PER_G;
     float az = azRaw / ACCEL_LSB_PER_G;
 
-    // Calculate Pitch from Accelerometer (vulnerable to jolts, immune to drift)
-    // Assuming the X-axis points to the front of the robot.
-    float accelPitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 180.0f / (float)PI;
+    // NEW FORWARD: The Y-axis is now forward.
+    // 'ay' replaces 'ax' as the pitch vector, and 'ax' handles the lateral vector.
+    float accelPitch = atan2f(-ay, sqrtf(ax * ax + az * az)) * 180.0f / (float)PI;
 
     // --- Process Gyroscope ---
-    int16_t gyRaw = (int16_t)((gyh << 8) | gyl);
+    // Because forward is Y, pitching the robot up rotates it around the X-axis.
+    int16_t gxRaw = (int16_t)((gxh << 8) | gxl);
     
-    // Calculate Pitch Rate from Gyro (immune to jolts, vulnerable to drift over time)
-    float gyroRateY = gyRaw / GYRO_LSB_PER_DEG;
+    float gyroRateX = -gxRaw / GYRO_LSB_PER_DEG;
 
     // --- COMPLEMENTARY FILTER ---
     if (!_seeded) {
-        // Initial trust entirely in the accelerometer to establish baseline
         _tiltAngle = accelPitch;
         _seeded = true;
     } else {
-        // Integrate the gyro rate to get the change in angle (gyroRate * dt), 
-        // then fuse it with the absolute accelerometer angle to lock the drift.
-        _tiltAngle = ALPHA * (_tiltAngle + gyroRateY * dt) + (1.0f - ALPHA) * accelPitch;
+        // Fuse the X-axis gyro rate with the Y-axis accelerometer pitch
+        _tiltAngle = ALPHA * (_tiltAngle + gyroRateX * dt) + (1.0f - ALPHA) * accelPitch;
     }
 
     // --- Hysteresis Latch ---
-    // Using absolute value (fabsf) so it triggers whether going UP or DOWN the ramp
     float absAngle = fabsf(_tiltAngle);
     
     if (!_onRamp && absAngle >= rampOnAngle) {
