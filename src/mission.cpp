@@ -153,6 +153,7 @@ void Mission::update() {
                 onRockCount = 0;
                 drive.turn(SWEEP_ARC, SWEEP_SPEED);
                 clusterHeading += SWEEP_ARC;
+                Serial.printf("[SWEEP] --- sweeping %.0f deg arc ---\n", SWEEP_ARC);
                 subStep = 2;
             }
         } else {  // subStep == 2: sweeping
@@ -168,6 +169,15 @@ void Mission::update() {
                 lastEdgeEvent    = e;
                 lastEdgeDeltaDeg = h;  // deg from sweep start
                 edgeEventSeq++;
+                // Print EVERY edge, whether the accept logic below keeps it or
+                // not. A START is kept only as the first one; an END is kept only
+                // once a START has been seen.
+                bool accepted = (e == Ultrasonic::START_EDGE) ? !foundStartEdge
+                                                              : foundStartEdge;
+                Serial.printf("[SWEEP] %-5s edge @ %6.1f deg  dist=%5.1f cm  %s\n",
+                              e == Ultrasonic::START_EDGE ? "START" : "END",
+                              h, ultra.filteredDistanceCm,
+                              accepted ? "(accepted)" : "(ignored)");
             }
             if (e == Ultrasonic::START_EDGE) {
                 if (!foundStartEdge) {          // keep the first entry
@@ -211,6 +221,27 @@ void Mission::update() {
                 sweepDistanceCm = minSweepDistance;
                 sweepResultSeq++;
 
+                Serial.printf("[SWEEP] DONE  start=%.1f end=%.1f width=%.1f (min=%.1f)  "
+                              "startEdge=%s endEdge=%s  dist=%.1f cm  -> %s\n",
+                              startEdgeAngle, endEdgeAngle, rockWidth, MIN_ROCK_ANGLE,
+                              foundStartEdge ? "yes" : "no",
+                              foundEndEdge ? "yes" : "no",
+                              minSweepDistance, sweepFound ? "ROCK" : "no rock");
+
+                // Bench test: don't travel anywhere. If we found a rock, stop and
+                // hold indefinitely so the result stays on screen/Serial. If not,
+                // recenter and sweep again.
+                if (sweepTestMode) {
+                    if (sweepFound) {
+                        drive.stop();
+                        Serial.println("[SWEEP] rock found -- holding.");
+                        enter(HOLD);
+                    } else {
+                        enter(SWEEP_TEST_RECENTER);
+                    }
+                    break;
+                }
+
                 if (foundStartEdge && foundEndEdge && rockWidth >= MIN_ROCK_ANGLE) {
                     float edgeMidpoint = (startEdgeAngle + endEdgeAngle) / 2.0f;
                     switch (aimMode) {
@@ -234,6 +265,22 @@ void Mission::update() {
                     // No clean low-high-low blip wide enough to be a rock.
                     enter(ADVANCE_CLUSTER);
                 }
+            }
+        }
+        break;
+
+    // ---- Bench test: recenter after a sweep, then sweep again --------------
+    case SWEEP_TEST_RECENTER:
+        // The sweep ends at +SWEEP_ARC/2 relative to the neutral heading; turn
+        // back by that much so the next sweep starts from the same place and the
+        // robot never walks away from where it is sitting.
+        if (subStep == 0) {
+            drive.turn(-SWEEP_ARC / 2.0f, SWEEP_SPEED);
+            subStep = 1;
+        } else if (subStep == 1) {
+            if (driveIdle()) {
+                clusterHeading = 0.0f;   // back at the neutral heading
+                enter(FIND_ROCK);        // sweep again
             }
         }
         break;

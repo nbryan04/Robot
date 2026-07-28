@@ -32,8 +32,8 @@ inline constexpr int HAND_CLOSE_ANGLE = 3;
 inline constexpr int HAND_OPEN_ANGLE = 90;
 
 // IR Sensor Pins (TBD - fill in once wired)
-inline constexpr int IR_ADC_PIN    = -1;  // analog input; must be an ADC1 pin (GPIO1-10 on the S3)
-inline constexpr int IR_SELECT_PIN = -1;  // HIGH = search 1kHz, LOW = search 10kHz
+inline constexpr int IR_ADC_PIN    = 5;  // analog input; must be an ADC1 pin (GPIO1-10 on the S3)
+inline constexpr int IR_SELECT_PIN = 38;  // HIGH = search 1kHz, LOW = search 10kHz
 
 // Define mapping for the LEFT motor
 // Define mapping for the LEFT motor
