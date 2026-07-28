@@ -165,7 +165,7 @@ void Mission::update() {
             // edge it was and how many degrees into the sweep arc it fired.
             if (e == Ultrasonic::START_EDGE || e == Ultrasonic::END_EDGE) {
                 lastEdgeEvent    = e;
-                lastEdgeDeltaDeg = h + SWEEP_ARC / 2.0f;  // deg from sweep start
+                lastEdgeDeltaDeg = h;  // deg from sweep start
                 edgeEventSeq++;
             }
             if (e == Ultrasonic::START_EDGE) {
@@ -205,8 +205,8 @@ void Mission::update() {
                 // Publish the sweep result for the OLED summary (angles as deg
                 // into the sweep arc; distance = closest reading seen).
                 sweepFound = (foundStartEdge && foundEndEdge && rockWidth >= MIN_ROCK_ANGLE);
-                sweepStartAngle = startEdgeAngle + SWEEP_ARC / 2.0f;
-                sweepEndAngle   = endEdgeAngle + SWEEP_ARC / 2.0f;
+                sweepStartAngle = startEdgeAngle;
+                sweepEndAngle   = endEdgeAngle;
                 sweepDistanceCm = minSweepDistance;
                 sweepResultSeq++;
 

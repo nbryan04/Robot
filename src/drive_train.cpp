@@ -31,7 +31,7 @@ void Drivetrain::driveStraight(float distanceMM, float speed) {
 }
 
 void Drivetrain::turn(float degrees, float speed) {
-    float trackWidth = 211.5; // (mm) 
+    float trackWidth = 215; // (mm) 
     float turningCircumference = PI * trackWidth;
     
     float distanceMM = turningCircumference * (abs(degrees) / 360.0f);
@@ -105,23 +105,15 @@ void Drivetrain::update() {
         long remainingTicks = abs(leftTargetEncoder - leftCurrent);
         float activeTargetSpeed = targetSpeed;
         
-        // --- THE FIX ---
-        // 1. Calculate the total size of the current move
         long totalMoveTicks = abs(leftTargetEncoder - leftStartEncoder);
-        
-        // 2. The slowdown zone is half a wheel rotation, OR half the total move, 
-        // whichever is smaller. This prevents short turns from braking instantly.
         long maxSlowdown = robotConfig::PULSES_REV / 2;
         long slowdownZone = min(maxSlowdown, (totalMoveTicks / 2)); 
 
         if (remainingTicks < slowdownZone) {
-            // 3. Give turning a higher minimum speed to overcome sideways scrubbing friction
             float minSafeSpeed = (state == Turning) ? 0.12f : 0.08f; 
-            
             float progress = (float)remainingTicks / slowdownZone; 
             activeTargetSpeed = minSafeSpeed + ((targetSpeed - minSafeSpeed) * progress);
         }
-        // ---------------
 
         int leftBasePWM = leftMotor.mapSpeedToDutyCycle(activeTargetSpeed);
         int rightBasePWM = rightMotor.mapSpeedToDutyCycle(activeTargetSpeed);
@@ -148,6 +140,13 @@ void Drivetrain::update() {
         if (leftDone || rightDone) {
             leftMotor.drive(0, robotConfig::STOPPED);
             rightMotor.drive(0, robotConfig::STOPPED);
+            
+            // --- NEW: Flag to indicate we need to settle ---
+            // We are done with targetSpeed for the main move, so we set it to 0 
+            // here to flag the Braking state that we need to wait for a stop.
+            targetSpeed = 0.0f; 
+            // -----------------------------------------------
+            
             state = Braking; 
         }
     }
@@ -156,10 +155,27 @@ void Drivetrain::update() {
     // STATE 2: Gentle Overshoot Correction (No PD Sync)
     // ---------------------------------------------------------
     else if (state == Braking) {
+        
+        // --- THE FIX: ONE-TIME SETTLING CHECK ---
+        // If targetSpeed is 0.0, we just transitioned from State 1 and are still coasting.
+        if (targetSpeed == 0.0f) {
+            float settleSpeedThreshold = 0.03f;
+            
+            // If still sliding, exit the loop and wait.
+            if (abs(leftMotor.speed()) > settleSpeedThreshold || abs(rightMotor.speed()) > settleSpeedThreshold) {
+                return; 
+            }
+            
+            // Once settled, change the flag to -1.0 so we bypass this check 
+            // entirely on the next loop, allowing the nudge to run smoothly!
+            targetSpeed = -1.0f; 
+        }
+        // ----------------------------------------
+
         long leftOvershoot = leftCurrent - leftTargetEncoder;
         long rightOvershoot = rightCurrent - rightTargetEncoder;
 
-        int deadband = 40; // Ticks of acceptable error tolerance
+        int deadband = 40; 
         
         bool leftNeedsCorrection = abs(leftOvershoot) > deadband;
         bool rightNeedsCorrection = abs(rightOvershoot) > deadband;
@@ -176,7 +192,6 @@ void Drivetrain::update() {
 
             if (rightNeedsCorrection) {
                 rightDriveDirection = (rightOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
-                // Applying your 1.07 hardware compensation multiplier directly to the nudge torque
                 rightMotor.drive((int)(nudgePWM * 1.07f), rightDriveDirection);
             } else {
                 rightMotor.drive(0, robotConfig::STOPPED);
