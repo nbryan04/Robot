@@ -1,9 +1,9 @@
 #include "mission.h"
 
 Mission::Mission(Drivetrain& dt, Ultrasonic& us, Camera& cam, Claw& cl,
-                 MetalDetector& md, TiltSensor& ts, LineFollower& lf)
+                 MetalDetector& md, TiltSensor& ts, LineFollower& lf, IR_Sensor& irs)
     : drive(dt), ultra(us), camera(cam), claw(cl),
-      metal(md), tilt(ts), line(lf) {}
+      metal(md), tilt(ts), line(lf), ir(irs) {}
 
 void Mission::begin() {
     // Baseline the forward odometer at the spawn pose. A normal run re-baselines
@@ -62,8 +62,9 @@ void Mission::update() {
     case ROUTER:
         if (phase == COLLECT) {
             enter(HOP_TO_CLUSTER);
+        } else if (phase == PANEL) {
+            enter(CREST);   // panel phase: crest -> find line -> follow to panel
         } else {
-            // PANEL / DONE are out of scope for this pass.
             enter(HOLD);
         }
         break;
@@ -557,7 +558,6 @@ void Mission::update() {
             stateTimer = millis();
             subStep = 1;
         } else {
-            line.update();  // keep the line on the ramp run (stub for now)
             if (tilt.isOnRamp()) {
                 drive.stop();
                 enter(RAMP_CLIMB);
@@ -575,7 +575,6 @@ void Mission::update() {
             stateTimer = millis();
             subStep = 1;
         } else {
-            line.update();  // follow line straight up (stub for now)
             bool settled = (millis() - stateTimer > RAMP_MIN_CLIMB_MS);
             if (settled && !tilt.isOnRamp()) {
                 drive.stop();
@@ -594,14 +593,61 @@ void Mission::update() {
         enter(CREST);
         break;
 
-    // ---- n26: Crest: re-localize ------------------------------------------
+    // ---- n26: Crest: on the upper deck, head for the panel ----------------
     case CREST:
         level = UPPER;
-        if (rocks_visited < 4) rocks_visited = 4;  // snap to 4
-        // Per-move relative odometry: distance origin resets on the next move.
-        // NOTE: crest fixes DISTANCE origin, not HEADING.
-        enter(ROUTER);
+        // Kick off the IR beacon search now (latches 1kHz/10kHz from the hardware
+        // select pin and starts background DMA sampling). Guarded: begin()/start
+        // abort on an unset pin, so only touch it once IR_ADC_PIN is wired.
+        if (robotConfig::IR_ADC_PIN >= 0) ir.startSearch();
+        enter(FIND_LINE);   // panel phase: find the line, then follow it to the panel
         break;
+
+    // ---- Panel: rotate to acquire the tape --------------------------------
+    // Spin in place (negative/CCW) until any LF sensor sees the tape, then follow
+    // it. Motors are driven directly, so the drivetrain state machine is parked
+    // Idle (drive.stop) to keep it out of the way.
+    case FIND_LINE:
+        if (subStep == 0) {
+            drive.stop();       // park the drivetrain loop; we drive motors directly
+            line.start();       // enable the LF sensor reads
+            subStep = 1;
+        } else {
+            line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());  // LF from the IR scan
+            if (line.seesLine()) {
+                drive.leftMotor.drive(0, robotConfig::STOPPED);
+                drive.rightMotor.drive(0, robotConfig::STOPPED);
+                enter(FOLLOW_LINE);
+            } else {
+                // Negative / CCW in-place rotation: left wheel back, right wheel fwd.
+                // Right motor is weaker, so scale its PWM up to keep the spin even.
+                drive.leftMotor.drive(LINE_SEEK_PWM, robotConfig::REVERSE);
+                drive.rightMotor.drive((int)(LINE_SEEK_PWM * LINE_RIGHT_SCALE), robotConfig::FORWARD);
+            }
+        }
+        break;
+
+    // ---- Panel: follow the tape until the IR beacon reads high ------------
+    // Steer by driving the motors directly from the LF correction. Stop once the
+    // IR_Sensor's Goertzel amplitude for the selected tone crosses the threshold.
+    case FOLLOW_LINE: {
+        line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());  // LF from the IR scan
+        double corr = line.getCorrection();
+        int leftPWM  = constrain((int)(LINE_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
+        int rightPWM = constrain((int)(LINE_BASE_PWM - corr), 0, robotConfig::MAX_DUTY);
+        drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
+        drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
+
+        // IR amplitude of the hardware-selected tone (0 until the pins are wired).
+        float irAmp = (robotConfig::IR_ADC_PIN >= 0) ? ir.magnitude() : 0.0f;
+        if (irAmp >= IR_AMPLITUDE_THRESHOLD) {
+            drive.stop();
+            line.stop();
+            if (robotConfig::IR_ADC_PIN >= 0) ir.stop();
+            enter(HOLD);   // reached the panel; stop for now
+        }
+        break;
+    }
 
     // ---- terminal: PANEL / DONE out of scope this pass --------------------
     case HOLD:
