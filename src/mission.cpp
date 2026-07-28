@@ -75,15 +75,20 @@ void Mission::update() {
         if (idx > 5) idx = 5;  // defensive clamp
 
         if (subStep == 0) {
-            // The hop to rock 5 (rocks_visited == 4) is hardcoded in HOP_LEGS[4]
-            // and dead-reckoned over the ramp just like any lower-level hop -- no
-            // line following.
+            // Before the hop to rock 5 (rocks_visited == 4), climb the ramp by
+            // following the line. Once we crest, RAMP_FOLLOW_LINE sets level=UPPER
+            // and returns here; the level==LOWER guard is then false so we fall
+            // through to the normal dead-reckoned hop (HOP_LEGS[4]) from the top.
+            if (idx == 4 && level == LOWER && enableRampLineFollow) {
+                enter(RAMP_FIND_LINE);
+                break;
+            }
             // Start the first leg of the hop path. Skip the turn if it's a
             // zero-angle leg (issuing a 0-magnitude move makes the drivetrain
             // jitter in place instead of finishing).
             hopLeg = 0;
             if (HOP_LEGS[idx][hopLeg].angleDeg != 0.0f) {
-                drive.turn(HOP_LEGS[idx][hopLeg].angleDeg, HOP_SPEED);
+                drive.turn(HOP_LEGS[idx][hopLeg].angleDeg, HOP_TURN_SPEED);
             }
             subStep = 1;
         } else if (subStep == 1) {
@@ -91,7 +96,7 @@ void Mission::update() {
             // Skip the drive on a zero-distance leg so a rotation-only leg works.
             if (driveIdle()) {
                 if (HOP_LEGS[idx][hopLeg].distMM != 0.0f) {
-                    drive.driveStraight(HOP_LEGS[idx][hopLeg].distMM, HOP_SPEED);
+                    drive.driveStraight(HOP_LEGS[idx][hopLeg].distMM, HOP_DRIVE_SPEED);
                 }
                 subStep = 2;
             }
@@ -101,7 +106,7 @@ void Mission::update() {
                 if (hopLeg < HOP_LEG_COUNT[idx]) {
                     // More legs to go: turn into the next one (skip if zero).
                     if (HOP_LEGS[idx][hopLeg].angleDeg != 0.0f) {
-                        drive.turn(HOP_LEGS[idx][hopLeg].angleDeg, HOP_SPEED);
+                        drive.turn(HOP_LEGS[idx][hopLeg].angleDeg, HOP_TURN_SPEED);
                     }
                     subStep = 1;
                 } else {
@@ -115,7 +120,7 @@ void Mission::update() {
                     // deliberately at rocks_visited==4 (subStep 0 -> FIND_LINE), so
                     // a stray isOnRamp() latch (e.g. a grab/turn jolt spiking the
                     // gyro-fused tilt) must NOT divert us mid-collection.
-                    if (enableRockSearch) {
+                    if (enableRockSearch && sweepOnRock[idx]) {
                         enter(FIND_ROCK);
                     } else if (enableMetalScan || enableTeletubbySweep) {
                         // No search/centre, but still run the camera scan (if
@@ -284,6 +289,69 @@ void Mission::update() {
             }
         }
         break;
+
+    // ---- Ramp (after rock 4): rotate to acquire the tape at the ramp foot --
+    // Same acquire logic as the panel FIND_LINE, but on success it climbs the
+    // ramp (RAMP_FOLLOW_LINE) rather than heading for the panel beacon. The LF
+    // channels are sampled by the IR DMA scan, so start the scan here.
+    case RAMP_FIND_LINE:
+        if (subStep == 0) {
+            drive.stop();        // park the drivetrain loop; drive motors directly
+            line.start();
+            if (robotConfig::IR_ADC_PIN >= 0) ir.startSearch();  // powers the LF DMA scan
+            subStep = 1;
+        } else {
+            line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());
+            if (line.seesLine()) {
+                drive.leftMotor.drive(0, robotConfig::STOPPED);
+                drive.rightMotor.drive(0, robotConfig::STOPPED);
+                enter(RAMP_FOLLOW_LINE);
+            } else {
+                // Negative / CCW in-place rotation, right motor scaled up to match.
+                drive.leftMotor.drive(LINE_SEEK_PWM, robotConfig::REVERSE);
+                drive.rightMotor.drive((int)(LINE_SEEK_PWM * LINE_RIGHT_SCALE), robotConfig::FORWARD);
+            }
+        }
+        break;
+
+    // ---- Ramp (after rock 4): follow the tape up the ramp to the crest -----
+    // Steer directly from the LF correction. Crest = the tilt sensor latched onto
+    // the incline and returned to flat; with the IMU unpinned (not present) that
+    // can't fire, so a forward-distance cap (RAMP_CLIMB_MAX_MM) is the fallback.
+    case RAMP_FOLLOW_LINE: {
+        if (subStep == 0) {
+            rampClimbOriginMM = drive.forwardOdometryMM();  // baseline the climb distance
+            rampWasTilted = false;
+            subStep = 1;
+        }
+
+        line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());
+        double corr = line.getCorrection();
+        int leftPWM  = constrain((int)(LINE_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
+        int rightPWM = constrain((int)(LINE_BASE_PWM - corr), 0, robotConfig::MAX_DUTY);
+        drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
+        drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
+
+        if (tilt.isOnRamp()) rampWasTilted = true;  // remember we climbed the incline
+        bool crestedByTilt = tilt.isPresent() && rampWasTilted && !tilt.isOnRamp();
+        float climbed = drive.forwardOdometryMM() - rampClimbOriginMM;
+        bool crestedByDist = (climbed >= RAMP_CLIMB_MAX_MM);
+
+        if (crestedByTilt || crestedByDist) {
+            drive.leftMotor.drive(0, robotConfig::STOPPED);
+            drive.rightMotor.drive(0, robotConfig::STOPPED);
+            drive.stop();
+            line.stop();
+            if (robotConfig::IR_ADC_PIN >= 0) ir.stop();
+            level = UPPER;              // on the upper deck now
+            if (pauseAtCrest) {
+                enter(HOLD);            // TEMP: stop at the crest for testing
+            } else {
+                enter(HOP_TO_CLUSTER);  // start the hop to rock 5 (HOP_LEGS[4])
+            }
+        }
+        break;
+    }
 
     // ---- n3: Travel to Rock -----------------------------------------------
     case TRAVEL_TO_ROCK:
@@ -678,6 +746,12 @@ void Mission::update() {
     // Steer by driving the motors directly from the LF correction. Stop once the
     // IR_Sensor's Goertzel amplitude for the selected tone crosses the threshold.
     case FOLLOW_LINE: {
+        if (subStep == 0) {
+            irWasAbove = false;      // fresh trigger latch for this follow
+            irTriggerValid = false;
+            subStep = 1;
+        }
+
         line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());  // LF from the IR scan
         double corr = line.getCorrection();
         int leftPWM  = constrain((int)(LINE_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
@@ -685,16 +759,60 @@ void Mission::update() {
         drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
         drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
 
-        // IR amplitude of the hardware-selected tone (0 until the pins are wired).
-        float irAmp = (robotConfig::IR_ADC_PIN >= 0) ? ir.magnitude() : 0.0f;
-        if (irAmp >= IR_AMPLITUDE_THRESHOLD) {
-            drive.stop();
-            line.stop();
-            if (robotConfig::IR_ADC_PIN >= 0) ir.stop();
-            enter(HOLD);   // reached the panel; stop for now
+        if (robotConfig::IR_ADC_PIN >= 0) {
+            // Latch the odometer position where the beacon amplitude FIRST crosses
+            // the threshold (the start of an above-threshold streak). detected()
+            // only confirms a few windows later, and the robot coasts past, so we
+            // remember this point and reverse back to it in PANEL_ALIGN.
+            bool above = (ir.magnitude() >= ir.threshold());
+            if (above && !irWasAbove) {
+                irTriggerMM = drive.forwardOdometryMM();
+                irTriggerValid = true;
+            }
+            irWasAbove = above;
+
+            // Stop once the IR sensor CONFIRMS the hardware-selected tone. detected()
+            // uses the per-tone threshold (THRESHOLD_1K / THRESHOLD_10K, chosen from
+            // the select pin) plus a multi-window confirm, so 1kHz and 10kHz are
+            // judged independently.
+            if (ir.detected()) {
+                drive.leftMotor.drive(0, robotConfig::STOPPED);
+                drive.rightMotor.drive(0, robotConfig::STOPPED);
+                line.stop();
+                ir.stop();
+                enter(PANEL_ALIGN);   // back up to the first-crossing point
+            }
         }
         break;
     }
+
+    // ---- Panel: realign to the beacon trigger point -----------------------
+    // The beacon confirms a little past where it first crossed threshold (confirm
+    // windows + coast), so reverse the overshoot to land on that point every time.
+    case PANEL_ALIGN:
+        if (subStep == 0) {
+            // Wait for the forward coast to fully stop BEFORE measuring how far we
+            // drifted past the trigger -- measuring mid-coast under-reads the
+            // overshoot (and we'd start reversing while still sliding forward).
+            drive.leftMotor.drive(0, robotConfig::STOPPED);
+            drive.rightMotor.drive(0, robotConfig::STOPPED);
+            float settleThresh = 0.03f;
+            if (fabs(drive.leftMotor.speed())  > settleThresh ||
+                fabs(drive.rightMotor.speed()) > settleThresh) {
+                break;   // still coasting; keep waiting
+            }
+            // Fully stopped: now the odometer reflects the true overshoot.
+            float overshoot = drive.forwardOdometryMM() - irTriggerMM;
+            if (irTriggerValid && overshoot > IR_ALIGN_DEADBAND_MM) {
+                drive.driveStraight(-overshoot, CENTRE_SPEED);  // slow reverse to the trigger
+                subStep = 1;
+            } else {
+                enter(HOLD);   // no valid trigger, or already close enough
+            }
+        } else {
+            if (driveIdle()) enter(HOLD);   // reached the panel; hold
+        }
+        break;
 
     // ---- terminal: PANEL / DONE out of scope this pass --------------------
     case HOLD:

@@ -64,6 +64,10 @@ public:
         CREST,            // n26: on the upper deck; hand off to the panel line
         FIND_LINE,        // rotate (negative/CCW) until the LF sees the tape
         FOLLOW_LINE,      // follow the tape until the IR panel beacon reads high
+        PANEL_ALIGN,      // reverse back to the point the beacon first crossed threshold
+        // --- ramp climb via line following (COLLECT, after rock 4) ---
+        RAMP_FIND_LINE,   // rotate until the LF sees the tape at the ramp foot
+        RAMP_FOLLOW_LINE, // follow the tape up the ramp until the crest, then hop to rock 5
         // --- ramp (old dead-reckoned approach; unused now) ---
         RAMP_APPROACH,    // n27: dead-reckon to ramp foot, watch tilt
         RAMP_CLIMB,       // n25: climb until flat (crest)
@@ -86,11 +90,28 @@ public:
 
     // Bypass the scanning-heavy states so you can exercise just the
     // hop -> find -> travel -> centre navigation spine.
-    bool enableRockSearch = true;      // false: skip find/travel/centre (n2-n4);
-                                       //        with metal scan on, hop straight
-                                       //        into the claw sequence at each rock
+    bool enableRockSearch = true;      // MASTER: false skips find/travel/centre
+                                       //        (n2-n4) at EVERY rock; with metal
+                                       //        scan on, hop straight into the claw
+                                       //        sequence at each rock
+    // Per-rock sweep gate, ANDed with enableRockSearch. Indexed by rocks_visited
+    // (0-based): [0]=rock1 [1]=rock2 [2]=rock3 [3]=rock4 [4]=rock5 [5]=rock6. A
+    // rock left false skips the sweep/travel/centre and goes straight to the scan
+    // at the dead-reckoned arrival pose. Default: sweep every rock.
+    bool sweepOnRock[6] = { false, false, true, true, true, true };
     bool enableTeletubbySweep = true;  // false: skip the camera sweep (n5)
     bool enableMetalScan = true;       // false: skip lower/scan/grab (n6-n10,n16)
+
+    // After rock 4, climb the ramp by FOLLOWING THE LINE (not dead reckoning),
+    // detect the crest, then start the dead-reckoned hop to rock 5 (HOP_LEGS[4]).
+    // false: hop straight over the ramp as before. Requires the IR pins wired
+    // (the LF channels ride the IR sensor's DMA scan).
+    bool enableRampLineFollow = true;
+
+    // TEMP TEST: stop and hold at the ramp crest instead of starting the hop to
+    // rock 5, so the crest detection can be checked in isolation. Set false to
+    // resume the normal flow (crest -> HOP_LEGS[4]).
+    bool pauseAtCrest = true;
 
     // TEST hook for the metal decision:
     //   0  = use the real detector
@@ -186,6 +207,15 @@ private:
                                    // ADVANCE and reversed to realign
     unsigned long stateTimer = 0;
 
+    // Ramp line-follow bookkeeping.
+    float rampClimbOriginMM = 0.0f; // odometer baseline captured when the climb starts
+    bool  rampWasTilted = false;    // tilt sensor latched onto the incline during the climb
+
+    // Panel beacon-align bookkeeping.
+    float irTriggerMM = 0.0f;       // odometer position where the beacon first crossed threshold
+    bool  irTriggerValid = false;   // have we latched a trigger position this FOLLOW_LINE
+    bool  irWasAbove = false;       // was the beacon above threshold on the previous window
+
     // Per-rock working values.
     float rockBearing = 0.0f;      // deg from post-hop forward
     float startEdgeAngle = 0.0f;
@@ -212,12 +242,13 @@ private:
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,260},{21, 185} },                 // -> rock 1
         { {-45, 275},{45, 400},{-60,10} },                 // -> rock 2
-        { {38, 361}, },    // -> rock 3: two legs (turn right, then left)
+        { {37, 361}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
-        { {-50, 350} , {-54.5, 1500} },                 // -> rock 5 (upper deck, after ramp)
-        { {0, 0} },                 // -> rock 6 (upper deck)
+        { {-20, 250} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
+        { {100, 300} },                 // -> rock 6 (upper deck)
     };
-    float HOP_SPEED = 0.15f;
+    float HOP_TURN_SPEED  = 0.15;   // speed for the in-place turn portion of a hop leg
+    float HOP_DRIVE_SPEED = 0.20;   // speed for the drive-straight portion of a hop leg
 
     float SWEEP_ARC        = 55.0f;  // deg, wide arc to cover drift
     float SWEEP_SPEED      = 0.15f;
@@ -245,18 +276,28 @@ private:
     unsigned long METAL_SAMPLE_SPACING_MS = 500;
 
     unsigned long CAMERA_PRESCAN_DELAY_MS = 500; // settle before triggering the camera
-    unsigned long TELETUBBY_SCAN_MS = 5000; // hold still this long for the camera scan
+    unsigned long TELETUBBY_SCAN_MS = 1000; // hold still this long for the camera scan
     unsigned long POINT_DWELL_MS = 600; // pause while pointing at a teletubby
 
     // Panel phase: rotate to find the tape, follow it, then stop on the IR beacon.
     // PWM duty is raw (0..MAX_DUTY = 1023); motors need ~350+ to move.
-    int LINE_SEEK_PWM = 420;   // in-place rotation speed while hunting for the tape
+    int LINE_SEEK_PWM = 600;   // in-place rotation speed while hunting for the tape
     int LINE_BASE_PWM = 600;   // forward speed while following the tape (both wheels)
     float LINE_RIGHT_SCALE = 1.07f;  // right motor is weaker: scale its PWM up to match
-    // Stop when the IR_Sensor's Goertzel amplitude for the hardware-selected tone
-    // (1kHz or 10kHz, per IR_SELECT_PIN) reaches this. Magnitude scale is ~[0, 1];
-    // the driver's own suggested threshold is ~0.10. Requires the IR pins wired.
-    float IR_AMPLITUDE_THRESHOLD = 0.10f;
+    // The stop condition (IR beacon) uses IR_Sensor::detected(), which applies the
+    // per-tone threshold THRESHOLD_1K / THRESHOLD_10K in ir_sensor.h (selected by
+    // IR_SELECT_PIN). Tune those two from the [IR] strength printed over Serial.
+    // On detection the robot reverses back to where the amplitude FIRST crossed the
+    // threshold (it drifts past during the confirm windows + coast), so the final
+    // stop is repeatable. Skip the reverse if the overshoot is under this (mm).
+    float IR_ALIGN_DEADBAND_MM = 5.0f;
+
+    // Ramp climb via line following (after rock 4). The crest is detected by the
+    // tilt sensor (latched onto the incline, then back to flat). Until the IMU is
+    // pinned in (tilt.isPresent()==false) that can't fire, so this odometry cap on
+    // the forward climb distance is the fallback crest trigger -- and a safety
+    // cap even once the IMU works. Tune to just past the ramp length.
+    float RAMP_CLIMB_MAX_MM = 1500.0f;
 
     // Ramp (old dead-reckoned approach; unused now).
     float RAMP_APPROACH_MM = 1000.0f;
