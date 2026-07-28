@@ -7,6 +7,7 @@
 #include "metal_detector.h"
 #include "tilt_sensor.h"
 #include "LineFollower.h"
+#include "ir_sensor.h"
 
 // Non-blocking mission state machine implementing the COLLECT phase of the
 // robot FSM: dead-reckon between rock clusters, find/centre/scan/grab each
@@ -58,17 +59,21 @@ public:
         RAISE_CLAW,       // n16: raise claw (decoy)
         ADVANCE_CLUSTER,  // n12: rocks_visited += 1
         ALL_DONE,         // n23: all rocks done? -> maybe phase = PANEL
+        SWEEP_TEST_RECENTER, // bench test: return to neutral heading, re-sweep
+        // --- panel phase (after collection): crest -> find/follow line to panel -
+        CREST,            // n26: on the upper deck; hand off to the panel line
+        FIND_LINE,        // rotate (negative/CCW) until the LF sees the tape
+        FOLLOW_LINE,      // follow the tape until the IR panel beacon reads high
         // --- ramp (old dead-reckoned approach; unused now) ---
         RAMP_APPROACH,    // n27: dead-reckon to ramp foot, watch tilt
         RAMP_CLIMB,       // n25: climb until flat (crest)
         RAMP_RECOVERY,    // n30: re-acquire / last-resort assume crest
-        CREST,            // n26: level = UPPER, snap rocks_visited to 4
         // --- terminal (out of scope for this pass) ---
         HOLD              // phase == PANEL/DONE: stop and hold
     };
 
     Mission(Drivetrain& dt, Ultrasonic& us, Camera& cam, Claw& cl,
-            MetalDetector& md, TiltSensor& ts, LineFollower& lf);
+            MetalDetector& md, TiltSensor& ts, LineFollower& lf, IR_Sensor& irs);
 
     void begin();
     void update();
@@ -111,6 +116,12 @@ public:
     // and HOLD instead of counting the rock and hopping onward. Lets you observe
     // the at-rock behaviour in isolation, on the bench, over and over.
     bool stopAfterRock = false;
+
+    // BENCH TEST (stationary sweep): jump straight to FIND_ROCK at startup and,
+    // instead of travelling to the rock, print the sweep result over Serial then
+    // recenter and sweep again -- forever. Lets you watch the edge detection in
+    // place. Serial prints every edge (accepted or ignored) with its delta angle.
+    bool sweepTestMode = false;
 
     // Mission variables (Init / Variables block of the FSM).
     Phase phase = COLLECT;         // COLLECT / PANEL / DONE
@@ -156,6 +167,7 @@ private:
     MetalDetector& metal;
     TiltSensor& tilt;
     LineFollower& line;
+    IR_Sensor& ir;
 
     // Per-state bookkeeping.
     int subStep = 0;
@@ -235,6 +247,16 @@ private:
     unsigned long CAMERA_PRESCAN_DELAY_MS = 500; // settle before triggering the camera
     unsigned long TELETUBBY_SCAN_MS = 5000; // hold still this long for the camera scan
     unsigned long POINT_DWELL_MS = 600; // pause while pointing at a teletubby
+
+    // Panel phase: rotate to find the tape, follow it, then stop on the IR beacon.
+    // PWM duty is raw (0..MAX_DUTY = 1023); motors need ~350+ to move.
+    int LINE_SEEK_PWM = 420;   // in-place rotation speed while hunting for the tape
+    int LINE_BASE_PWM = 600;   // forward speed while following the tape (both wheels)
+    float LINE_RIGHT_SCALE = 1.07f;  // right motor is weaker: scale its PWM up to match
+    // Stop when the IR_Sensor's Goertzel amplitude for the hardware-selected tone
+    // (1kHz or 10kHz, per IR_SELECT_PIN) reaches this. Magnitude scale is ~[0, 1];
+    // the driver's own suggested threshold is ~0.10. Requires the IR pins wired.
+    float IR_AMPLITUDE_THRESHOLD = 0.10f;
 
     // Ramp (old dead-reckoned approach; unused now).
     float RAMP_APPROACH_MM = 1000.0f;

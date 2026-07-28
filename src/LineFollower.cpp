@@ -3,16 +3,11 @@
 #include "LineFollower.h"
 #include "config.h"
 
-LineFollower::LineFollower(int lSensorPin, int mSensorPin, int rSensorPin) {
-    lPin = lSensorPin;
-    mPin = mSensorPin;
-    rPin = rSensorPin;
-}
+LineFollower::LineFollower() {}
 
 void LineFollower::begin() {
-    pinMode(lPin, INPUT);
-    pinMode(mPin, INPUT);
-    pinMode(rPin, INPUT);
+    // No-op: the ADC channels are configured and sampled by IR_Sensor's
+    // continuous scan; this class only consumes the raw values via update().
 }
 
 void LineFollower::start() {
@@ -29,18 +24,18 @@ bool LineFollower::isFollowing() {
     return active;
 }
 
-void LineFollower::update() {
+void LineFollower::update(int rawLeft, int rawMid, int rawRight) {
     if (!active) return;
 
     unsigned long currentMillis = millis();
-    
-    // Only process the analog reads and math every 10ms
+
+    // Only recompute the error/correction every 10ms.
     if (currentMillis - lastUpdateTime >= UPDATE_INTERVAL) {
         lastUpdateTime = currentMillis;
 
-        bool leftVal = analogRead(lPin) > robotConfig::LF_THRESHOLD;
-        bool midVal = analogRead(mPin) > robotConfig::LF_THRESHOLD;
-        bool rightVal = analogRead(rPin) > robotConfig::LF_THRESHOLD;
+        bool leftVal = rawLeft > robotConfig::LF_THRESHOLD;
+        bool midVal = rawMid > robotConfig::LF_THRESHOLD;
+        bool rightVal = rawRight > robotConfig::LF_THRESHOLD;
 
         // Any sensor over the tape means we've found / are on the line.
         onLine = (leftVal || midVal || rightVal);
