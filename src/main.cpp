@@ -7,6 +7,7 @@
 #include "metal_detector.h"
 #include "tilt_sensor.h"
 #include "LineFollower.h"
+#include "ir_sensor.h"
 #include "mission.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -66,9 +67,11 @@ Camera       camera(CAMERA_IN_PIN, CAMERA_OUT_PIN);
 Claw         claw(CLAW_HAND_PIN, CLAW_ARM_PIN);
 MetalDetector metalDetector(METAL_PIN);
 TiltSensor   tiltSensor(IMU_SDA_PIN, IMU_SCL_PIN);
-LineFollower lineFollower(LF_LEFT_PIN, LF_MID_PIN, LF_RIGHT_PIN);
+LineFollower lineFollower;   // logic only; ADC channels are owned by irSensor
+IR_Sensor    irSensor(robotConfig::IR_ADC_PIN, robotConfig::IR_SELECT_PIN,
+                      LF_LEFT_PIN, LF_MID_PIN, LF_RIGHT_PIN);
 
-Mission mission(drivetrain, ultrasonic, camera, claw, metalDetector, tiltSensor, lineFollower);
+Mission mission(drivetrain, ultrasonic, camera, claw, metalDetector, tiltSensor, lineFollower, irSensor);
 
 void oledSetup() {
     Wire.begin(OLED_SDA, OLED_SCL);
@@ -169,6 +172,7 @@ void showSweepResult() {
 }
 
 void setup() {
+    Serial.begin(115200);   // USB CDC: sweep-test debug output
     // oledSetup();  // OLED off
     motorLeft.begin();
     motorRight.begin();
@@ -178,19 +182,23 @@ void setup() {
     metalDetector.begin();
     tiltSensor.begin();
     lineFollower.begin();
+    // Guarded: IR_Sensor::begin() aborts on an unset ADC pin, so only start it
+    // once IR_ADC_PIN is wired in config.h.
+    if (robotConfig::IR_ADC_PIN >= 0) irSensor.begin();
 
     // Brief pause before the robot starts moving.
     delay(2000);
 
     // Sweep + centring disabled for now (line-following ramp focus): hop between
     // clusters without the ultrasonic search, and skip the post-centre realign.
-    mission.enableRockSearch = false;  // no FIND_ROCK sweep / travel / centre
-    mission.enableTeletubbySweep = true;   // 2s camera scan once aligned on the rock
+    mission.enableRockSearch = true;   // full sweep -> travel -> centre
+    mission.enableTeletubbySweep = true;   // ~5s camera scan once aligned on the rock
     mission.enableMetalScan = true;    // run the claw lower/scan/grab at each rock
     mission.testMetalOnRock = 0;       // 0 = use the real detector
     mission.aimMode = Mission::AIM_EDGE_MIDPOINT;  // aim at the midpoint of the two edges
-    mission.returnAfterCentre = false;        // no realignment (nothing to undo)
+    mission.returnAfterCentre = true;         // realign: reverse the travel/centre distance back to the arrival pose
 
+    // Regular run: start in COLLECT (default) and hop through all clusters.
     mission.begin();
 }
 
@@ -204,6 +212,7 @@ void loop() {
     ultrasonic.update();    // ping + filter + edge detection for the sweep
     metalDetector.update(); // updates the running frequency / shift
     tiltSensor.update();    // reads the MPU-6050, updates the ramp latch
+    irSensor.update();      // drains the IR DMA buffer + Goertzel (no-op until searching)
 
     // High-level mission state machine.
     mission.update();
