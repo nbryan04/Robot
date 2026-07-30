@@ -56,7 +56,7 @@ inline int rightSpeedToDuty(float speed) {
     // Slope: 1311.5 * 1.07 = 1403.3
     // Intercept: 342 * 1.07 = ~366
     // int calculatedPWM = (1403.3 * speed) + 366;
-    int calculatedPWM = round(leftSpeedToDuty(speed) * 1.075f); // Round to nearest integer
+    int calculatedPWM = round(leftSpeedToDuty(speed) * 1.06f); // Round to nearest integer
     return constrain(calculatedPWM, 0, robotConfig::MAX_DUTY);
 
 }
