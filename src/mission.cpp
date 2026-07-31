@@ -438,7 +438,10 @@ void Mission::update() {
     // ---- n5: Teletubby scan (stationary; the camera does the scanning) ----
     case TELETUBBY_SWEEP:
         if (subStep == 0) {
-            if (!enableTeletubbySweep) {  // bench-test bypass
+            // Bypass the scan if it's disabled, or if we already have both
+            // teletubbies -- no point holding for the camera on the rest of the
+            // rocks once the count is full.
+            if (!enableTeletubbySweep || teletubbies >= 2) {
                 enter(NEED_METAL);
                 break;
             }
@@ -710,12 +713,27 @@ void Mission::update() {
 
     // ---- n26: Crest: on the upper deck, head for the panel ----------------
     case CREST:
-        level = UPPER;
-        // Kick off the IR beacon search now (latches 1kHz/10kHz from the hardware
-        // select pin and starts background DMA sampling). Guarded: begin()/start
-        // abort on an unset pin, so only touch it once IR_ADC_PIN is wired.
-        if (robotConfig::IR_ADC_PIN >= 0) ir.startSearch();
-        enter(FIND_LINE);   // panel phase: find the line, then follow it to the panel
+        if (subStep == 0) {
+            level = UPPER;
+            // On the 6th rock (collection done), back up first so FIND_LINE's spin
+            // doesn't latch onto a crack in the course near the stop point that
+            // looks like the line. Only here, not at the other rocks.
+            if (rocks_visited >= 6 && PANEL_PRECREST_BACKUP_MM != 0.0f) {
+                drive.driveStraight(-PANEL_PRECREST_BACKUP_MM, CENTRE_SPEED);
+                subStep = 1;
+            } else {
+                subStep = 2;   // no backup: fall straight into the line hunt
+            }
+        } else if (subStep == 1) {
+            if (!driveIdle()) break;   // wait for the backup to finish
+            subStep = 2;
+        } else {  // subStep == 2: start the line hunt
+            // Kick off the IR beacon search now (latches 1kHz/10kHz from the
+            // hardware select pin and starts background DMA sampling). Guarded:
+            // begin()/start abort on an unset pin, so only touch it once wired.
+            if (robotConfig::IR_ADC_PIN >= 0) ir.startSearch();
+            enter(FIND_LINE);   // panel phase: find the line, then follow it to the panel
+        }
         break;
 
     // ---- Panel: rotate to acquire the tape --------------------------------
@@ -807,10 +825,68 @@ void Mission::update() {
                 drive.driveStraight(-overshoot, CENTRE_SPEED);  // slow reverse to the trigger
                 subStep = 1;
             } else {
-                enter(HOLD);   // no valid trigger, or already close enough
+                enter(PANEL_REMOVE);   // no reverse needed; go straight to removal
             }
         } else {
-            if (driveIdle()) enter(HOLD);   // reached the panel; hold
+            if (driveIdle()) enter(PANEL_REMOVE);   // on the IR spot; run the removal
+        }
+        break;
+
+    // ---- Panel: removal sequence (claw + drive interleaved) ---------------
+    // Runs once the robot is parked on the beacon spot:
+    //   lower claw -> pre-drive -> turn1 -> drive straight -> turn2.
+    // The HAND stays CLOSED for the whole procedure; the arm just lowers to
+    // PANEL_ARM_ANGLE (hover) and holds it out. Closed-loop drivetrain moves so
+    // each leg is precise.
+    case PANEL_REMOVE:
+        if (subStep == 0) {
+            // Hand CLOSED the whole time; lower the arm to the panel (hover) angle.
+            claw.setAngle(claw.hpin, robotConfig::HAND_CLOSE_ANGLE);
+            claw.setAngle(claw.apin, PANEL_ARM_ANGLE);
+            Serial.println("[PANEL] lower to panel angle (hand closed)");
+            stateTimer = millis();
+            subStep = 1;
+        } else if (subStep == 1) {
+            // Arm settled: short pre-drive forward before the first turn.
+            if (millis() - stateTimer >= PANEL_ARM_SETTLE_MS) {
+                if (PANEL_REMOVE_PREDRIVE_MM != 0.0f) {
+                    drive.driveStraight(PANEL_REMOVE_PREDRIVE_MM, PANEL_REMOVE_DRIVE_SPEED);
+                }
+                Serial.println("[PANEL] pre-drive");
+                subStep = 2;
+            }
+        } else if (subStep == 2) {
+            // Pre-drive done: first turn.
+            if (driveIdle()) {
+                if (PANEL_REMOVE_TURN1_DEG != 0.0f) {
+                    drive.turn(PANEL_REMOVE_TURN1_DEG, PANEL_REMOVE_TURN_SPEED);
+                }
+                Serial.println("[PANEL] turn 1");
+                subStep = 3;
+            }
+        } else if (subStep == 3) {
+            // First turn done: drive straight (hand stays closed throughout).
+            if (driveIdle()) {
+                if (PANEL_REMOVE_DRIVE_MM != 0.0f) {
+                    drive.driveStraight(PANEL_REMOVE_DRIVE_MM, PANEL_REMOVE_DRIVE_SPEED);
+                }
+                Serial.println("[PANEL] drive straight (hand closed)");
+                subStep = 4;
+            }
+        } else if (subStep == 4) {
+            // Final turn, claw still out and closed.
+            if (driveIdle()) {
+                if (PANEL_REMOVE_TURN2_DEG != 0.0f) {
+                    drive.turn(PANEL_REMOVE_TURN2_DEG, PANEL_REMOVE_TURN_SPEED);
+                }
+                Serial.println("[PANEL] turn 2 (final)");
+                subStep = 5;
+            }
+        } else {  // subStep == 5
+            if (driveIdle()) {
+                Serial.println("[PANEL] removal done -- holding");
+                enter(HOLD);   // removal done; hold
+            }
         }
         break;
 

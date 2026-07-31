@@ -12,7 +12,14 @@ void LineFollower::begin() {
 
 void LineFollower::start() {
     active = true;
-    lastUpdateTime = millis();
+    // Clear leftover state from a previous line-follow so seesLine() can't return
+    // a stale "on line" (e.g. the ramp climb ended sitting on the tape). Also
+    // back-date the throttle so the FIRST update() recomputes immediately instead
+    // of returning the stale onLine for the first ~10ms.
+    onLine = false;
+    error = lastError = recentError = 0;
+    currentCorrection = 0.0;
+    lastUpdateTime = millis() - UPDATE_INTERVAL;
 }
 
 void LineFollower::stop() {
