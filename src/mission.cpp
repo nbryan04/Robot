@@ -327,8 +327,8 @@ void Mission::update() {
 
         line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());
         double corr = line.getCorrection();
-        int leftPWM  = constrain((int)(LINE_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
-        int rightPWM = constrain((int)(LINE_BASE_PWM - corr), 0, robotConfig::MAX_DUTY);
+        int leftPWM  = constrain((int)(RAMP_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
+        int rightPWM = constrain((int)(RAMP_BASE_PWM - corr), 0, robotConfig::MAX_DUTY);
         drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
         drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
 
@@ -594,7 +594,9 @@ void Mission::update() {
         if (subStep == 0) {
             claw.storeToBasket();
             subStep = 1;
-        } else if (!claw.actionBusy()) {
+        } else if (claw.armLiftedOffRock()) {
+            // Arm is up off the rock: start realigning/hopping now and let the claw
+            // finish storing (release + jitter) in the background as we move.
             rock = 1;   // we now hold the metal rock; later clusters skip the claw
             enter(ADVANCE_CLUSTER);
         }
@@ -605,7 +607,9 @@ void Mission::update() {
         if (subStep == 0) {
             claw.raiseToRest();
             subStep = 1;
-        } else if (!claw.actionBusy()) {
+        } else if (claw.armLiftedOffRock()) {
+            // Arm is back at hover: start realigning/hopping now and let the claw
+            // finish raising to rest in the background as we move.
             enter(ADVANCE_CLUSTER);
         }
         break;
@@ -619,6 +623,20 @@ void Mission::update() {
         // subStep 2-3: undo the net rotation the sweep/approach added, so the
         //   next hop is measured from the heading we ARRIVED with.
         if (subStep == 0) {
+            // Rocks 4 and 6 (rocks_visited 3 and 5 here, before it is incremented)
+            // are each followed immediately by a crest that re-acquires position
+            // from the line (ramp line-follow after rock 4, panel line-find after
+            // rock 6). The realignment back to the arrival pose is therefore wasted
+            // time -- skip it and head straight for the crest to save run time.
+            if (rocks_visited == 3 || rocks_visited == 5) {
+                if (stopAfterRock) {
+                    enter(HOLD);
+                } else {
+                    rocks_visited += 1;
+                    enter(ALL_DONE);
+                }
+                break;
+            }
             // Net forward distance since arriving at this rock, read straight from
             // both encoders: the sweep turns cancel in the average, leaving only
             // the travel + centring translation. Reverse it to land back at the
@@ -780,8 +798,8 @@ void Mission::update() {
         if (robotConfig::IR_ADC_PIN >= 0) {
             // Latch the odometer position where the beacon amplitude FIRST crosses
             // the threshold (the start of an above-threshold streak). detected()
-            // only confirms a few windows later, and the robot coasts past, so we
-            // remember this point and reverse back to it in PANEL_ALIGN.
+            // only confirms a few windows later, and the robot coasts past. The
+            // removal's first move (PANEL_REMOVE) realigns to this point + pre-drive.
             bool above = (ir.magnitude() >= ir.threshold());
             if (above && !irWasAbove) {
                 irTriggerMM = drive.forwardOdometryMM();
@@ -798,43 +816,17 @@ void Mission::update() {
                 drive.rightMotor.drive(0, robotConfig::STOPPED);
                 line.stop();
                 ir.stop();
-                enter(PANEL_ALIGN);   // back up to the first-crossing point
+                enter(PANEL_REMOVE);   // removal's first move realigns to the trigger
             }
         }
         break;
     }
 
-    // ---- Panel: realign to the beacon trigger point -----------------------
-    // The beacon confirms a little past where it first crossed threshold (confirm
-    // windows + coast), so reverse the overshoot to land on that point every time.
-    case PANEL_ALIGN:
-        if (subStep == 0) {
-            // Wait for the forward coast to fully stop BEFORE measuring how far we
-            // drifted past the trigger -- measuring mid-coast under-reads the
-            // overshoot (and we'd start reversing while still sliding forward).
-            drive.leftMotor.drive(0, robotConfig::STOPPED);
-            drive.rightMotor.drive(0, robotConfig::STOPPED);
-            float settleThresh = 0.03f;
-            if (fabs(drive.leftMotor.speed())  > settleThresh ||
-                fabs(drive.rightMotor.speed()) > settleThresh) {
-                break;   // still coasting; keep waiting
-            }
-            // Fully stopped: now the odometer reflects the true overshoot.
-            float overshoot = drive.forwardOdometryMM() - irTriggerMM;
-            if (irTriggerValid && overshoot > IR_ALIGN_DEADBAND_MM) {
-                drive.driveStraight(-overshoot, CENTRE_SPEED);  // slow reverse to the trigger
-                subStep = 1;
-            } else {
-                enter(PANEL_REMOVE);   // no reverse needed; go straight to removal
-            }
-        } else {
-            if (driveIdle()) enter(PANEL_REMOVE);   // on the IR spot; run the removal
-        }
-        break;
-
     // ---- Panel: removal sequence (claw + drive interleaved) ---------------
-    // Runs once the robot is parked on the beacon spot:
-    //   lower claw -> pre-drive -> turn1 -> drive straight -> turn2.
+    // Runs once the beacon trips. The FIRST movement doubles as the realignment:
+    // rather than reversing to the trigger point and then pre-driving forward, we
+    // drive straight in ONE move to (trigger + pre-drive), correcting the coast
+    // overshoot and doing the pre-drive at once. Then: turn1 -> drive -> turn2.
     // The HAND stays CLOSED for the whole procedure; the arm just lowers to
     // PANEL_ARM_ANGLE (hover) and holds it out. Closed-loop drivetrain moves so
     // each leg is precise.
@@ -847,14 +839,28 @@ void Mission::update() {
             stateTimer = millis();
             subStep = 1;
         } else if (subStep == 1) {
-            // Arm settled: short pre-drive forward before the first turn.
-            if (millis() - stateTimer >= PANEL_ARM_SETTLE_MS) {
-                if (PANEL_REMOVE_PREDRIVE_MM != 0.0f) {
-                    drive.driveStraight(PANEL_REMOVE_PREDRIVE_MM, PANEL_REMOVE_DRIVE_SPEED);
-                }
-                Serial.println("[PANEL] pre-drive");
-                subStep = 2;
+            // Wait for the arm to settle AND the forward coast to fully stop before
+            // measuring the odometer (a mid-coast read under-corrects). Then the
+            // realign IS the first movement: one straight move to trigger+pre-drive.
+            if (millis() - stateTimer < PANEL_ARM_SETTLE_MS) break;
+            float settleThresh = 0.03f;
+            if (fabs(drive.leftMotor.speed())  > settleThresh ||
+                fabs(drive.rightMotor.speed()) > settleThresh) {
+                break;   // still coasting; keep waiting
             }
+            // Target = beacon trigger + pre-drive. move = target - current position;
+            // positive drives forward, negative trims the overshoot back.
+            float move;
+            if (irTriggerValid) {
+                move = (irTriggerMM + PANEL_REMOVE_PREDRIVE_MM) - drive.forwardOdometryMM();
+            } else {
+                move = PANEL_REMOVE_PREDRIVE_MM;  // no trigger latched: plain pre-drive
+            }
+            if (fabs(move) > IR_ALIGN_DEADBAND_MM) {
+                drive.driveStraight(move, PANEL_REMOVE_DRIVE_SPEED);
+            }
+            Serial.printf("[PANEL] realign + pre-drive: %.1f mm\n", move);
+            subStep = 2;
         } else if (subStep == 2) {
             // Pre-drive done: first turn.
             if (driveIdle()) {

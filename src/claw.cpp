@@ -152,6 +152,17 @@ bool Claw::actionBusy() {
     return actionSeq != ACT_NONE;
 }
 
+bool Claw::armLiftedOffRock() {
+    // During raiseToRest / storeToBasket the arm is still down on the rock until
+    // its first arm-up stage completes. Both sequences reach actionStep >= 2 once
+    // the arm has arrived (hover for RAISE, top for STORE), which is the point it
+    // is safe to start driving. Any other time nothing is holding it down.
+    if (actionSeq == ACT_RAISE || actionSeq == ACT_STORE) {
+        return actionStep >= 2;
+    }
+    return true;
+}
+
 void Claw::updateAction() {
     unsigned long now = millis();
 
