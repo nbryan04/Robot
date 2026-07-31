@@ -23,15 +23,23 @@ bool Camera::checkForTeletubby() {
     digitalWrite(inputPin, LOW); */
     Communications::cameraTrigger data;
     data.triggerState = true;
+    // Clear any stale/late reply from a previous trigger BEFORE sending, so this
+    // scan only accepts a fresh answer to the trigger we're about to send.
+    Communications::resetHasNewMessage();
     if (Communications::send_message(data)) {
 	Serial.println("cameraTrigger sent successfully"); //debugging statement
         long currentTime = millis();
         while (millis() - currentTime < 3000) {
             if (Communications::hasNewMessage()) {
+		bool found = Communications::teletubbyFound();
+		// Consume this reply so newMessage doesn't stay latched -- otherwise the
+		// next scan sees it already true and returns this stale result instead
+		// of waiting for a fresh answer.
+		Communications::resetHasNewMessage();
 		Serial.println("Message received from camera"); //debugging statements
 		Serial.print("Teletubby found:");
-		Serial.println(Communications::teletubbyFound());
-                return Communications::teletubbyFound();
+		Serial.println(found);
+                return found;
             }
         }
     }

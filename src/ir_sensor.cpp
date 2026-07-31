@@ -64,6 +64,10 @@ void IR_Sensor::startSearch() {
     resetWindow();
     _hits = 0;
     _lastMag = 0.0f;
+    // Clear the last search's line-follower values so the first reads after a
+    // restart don't carry stale (e.g. ramp-climb) levels before fresh DMA samples
+    // land -- otherwise the LF could momentarily "see" a line that isn't there.
+    _lfRaw[0] = _lfRaw[1] = _lfRaw[2] = 0;
 
     if (_state == State::IDLE) {
         ESP_ERROR_CHECK(adc_continuous_start(_handle));

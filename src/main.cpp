@@ -231,10 +231,12 @@ void loop() {
         static unsigned long lastIrPrint = 0;
         if (millis() - lastIrPrint >= 100) {
             lastIrPrint = millis();
-            Serial.printf("[IR] f=%.0fHz  mag=%.4f  thr=%.4f  %s\n",
+            Serial.printf("[IR] f=%.0fHz  mag=%.4f  thr=%.4f  %s | LF L=%d M=%d R=%d (thr=%d)\n",
                           irSensor.targetFreq(), irSensor.magnitude(),
                           irSensor.threshold(),
-                          irSensor.detected() ? "DETECTED" : "searching");
+                          irSensor.detected() ? "DETECTED" : "searching",
+                          irSensor.lfLeftRaw(), irSensor.lfMidRaw(), irSensor.lfRightRaw(),
+                          robotConfig::LF_THRESHOLD);
         }
     }
 

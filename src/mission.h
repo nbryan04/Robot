@@ -64,7 +64,7 @@ public:
         CREST,            // n26: on the upper deck; hand off to the panel line
         FIND_LINE,        // rotate (negative/CCW) until the LF sees the tape
         FOLLOW_LINE,      // follow the tape until the IR panel beacon reads high
-        PANEL_ALIGN,      // reverse back to the point the beacon first crossed threshold
+        PANEL_REMOVE,     // removal: first move realigns to (trigger + pre-drive), then turn -> drive -> turn
         // --- ramp climb via line following (COLLECT, after rock 4) ---
         RAMP_FIND_LINE,   // rotate until the LF sees the tape at the ramp foot
         RAMP_FOLLOW_LINE, // follow the tape up the ramp until the crest, then hop to rock 5
@@ -282,7 +282,8 @@ private:
     // Panel phase: rotate to find the tape, follow it, then stop on the IR beacon.
     // PWM duty is raw (0..MAX_DUTY = 1023); motors need ~350+ to move.
     int LINE_SEEK_PWM = 600;   // in-place rotation speed while hunting for the tape
-    int LINE_BASE_PWM = 600;   // forward speed while following the tape (both wheels)
+    int LINE_BASE_PWM = 600;   // forward speed while following the tape at the PANEL
+    int RAMP_BASE_PWM = 800;   // forward speed while following the tape up the RAMP (needs more to climb)
     float LINE_RIGHT_SCALE = 1.07f;  // right motor is weaker: scale its PWM up to match
     // The stop condition (IR beacon) uses IR_Sensor::detected(), which applies the
     // per-tone threshold THRESHOLD_1K / THRESHOLD_10K in ir_sensor.h (selected by
@@ -291,6 +292,28 @@ private:
     // threshold (it drifts past during the confirm windows + coast), so the final
     // stop is repeatable. Skip the reverse if the overshoot is under this (mm).
     float IR_ALIGN_DEADBAND_MM = 5.0f;
+
+    // Panel CREST: after the 6th rock, back up this far (mm) before hunting for the
+    // line. A crack in the course near the stopping point looks like the line to
+    // the LF, so backing off clears it before FIND_LINE spins. Only runs when all
+    // rocks are done (rocks_visited >= 6); 0 disables it.
+    float PANEL_PRECREST_BACKUP_MM = 200.0f;
+
+    // Panel removal sequence (runs once the beacon trips in FOLLOW_LINE): lower
+    // claw -> realign+pre-drive (one move to trigger + PREDRIVE) -> turn1 ->
+    // drive straight -> turn2. Angles: + = right/CW, - = left/CCW.
+    float PANEL_REMOVE_PREDRIVE_MM = 50.0f;  // short straight after lowering, before turn1
+    float PANEL_REMOVE_TURN1_DEG  = 85.0f;   // first turn off the beacon spot
+    float PANEL_REMOVE_DRIVE_MM   = 135.0f;  // straight leg (through the arch) after turn1
+    float PANEL_REMOVE_TURN2_DEG  = -90.0f;   // second turn to finish the sequence
+    float PANEL_REMOVE_TURN_SPEED = 0.22f;   // speed for the two turns
+    float PANEL_REMOVE_DRIVE_SPEED = 0.15f;  // speed for the straight leg
+
+    // Claw during the panel removal. The HAND stays CLOSED for the whole procedure
+    // (never opens). The arm just lowers to PANEL_ARM_ANGLE -- the claw's HOVER
+    // angle (ARM_DOWN + 45 = 55) -- and holds it out through every leg.
+    int  PANEL_ARM_ANGLE = 45;                // hover angle (ARM_DOWN_ANGLE + 45)
+    unsigned long PANEL_ARM_SETTLE_MS = 700;  // time for the arm to reach the panel angle
 
     // Ramp climb via line following (after rock 4). The crest is detected by the
     // tilt sensor (latched onto the incline, then back to flat). Until the IMU is

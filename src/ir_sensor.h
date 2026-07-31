@@ -53,7 +53,7 @@ private:
     static constexpr int   WINDOW_N      = 200;       // samples/window -> 5ms, integer k for both tones
     static constexpr float FREQ_LOW      = 1000.0f;   // select HIGH
     static constexpr float FREQ_HIGH     = 10000.0f;  // select LOW
-    static constexpr float THRESHOLD_1K  = 0.10f;     // TBD: calibrate via magnitude()
+    static constexpr float THRESHOLD_1K  = 0.08f;     // TBD: calibrate via magnitude()
     static constexpr float THRESHOLD_10K = 0.02f;     // TBD: calibrate via magnitude()
     static constexpr int   CONFIRM_COUNT = 4;         // windows in a row above threshold = detected
 
