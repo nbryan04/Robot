@@ -29,8 +29,8 @@ struct Drivetrain {
     float targetSpeed = 0.0;
 
     // Tuning constants
-    float Kp_sync = .1; 
-    float Kv_sync = 5000; 
+    float Kp_sync = .2; 
+    float Kv_sync = 7000; 
     int brakeTicks = 20; // Number of ticks to reverse for active braking
 
     Drivetrain(Motor& left, Motor& right);

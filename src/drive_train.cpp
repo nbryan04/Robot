@@ -134,8 +134,40 @@ void Drivetrain::update() {
         leftMotor.drive(leftFinalPWM, leftDriveDirection);
         rightMotor.drive(rightFinalPWM, rightDriveDirection);
 
-        bool leftDone = (leftDriveDirection == robotConfig::FORWARD) ? (leftCurrent >= leftTargetEncoder) : (leftCurrent <= leftTargetEncoder);
-        bool rightDone = (rightDriveDirection == robotConfig::FORWARD) ? (rightCurrent >= rightTargetEncoder) : (rightCurrent <= rightTargetEncoder);
+        // --- Anticipate Overshoot Based on Initial Speed ---
+        float expectedOvershootMM = 0.0f;
+        
+        if (state == DrivingStraight) {
+            expectedOvershootMM = (312.5f * targetSpeed) - 12.5f;
+            if (expectedOvershootMM < 0.0f) expectedOvershootMM = 0.0f; 
+            
+            float totalMoveMM = (float)totalMoveTicks * (robotConfig::WHEEL_1_CIRCUMFERENCE / (float)robotConfig::PULSES_REV);
+            
+            float maxAnticipationMM = totalMoveMM - 25.0f;
+            if (maxAnticipationMM < 0.0f) maxAnticipationMM = 0.0f; 
+            
+            float halfMoveMM = totalMoveMM / 2.0f;
+            if (maxAnticipationMM > halfMoveMM) {
+                maxAnticipationMM = halfMoveMM;
+            }
+
+            if (expectedOvershootMM > maxAnticipationMM) {
+                expectedOvershootMM = maxAnticipationMM;
+            }
+        }
+
+        long anticipationTicks = (expectedOvershootMM / robotConfig::WHEEL_1_CIRCUMFERENCE) * robotConfig::PULSES_REV;
+
+        long leftStopThreshold = (leftDriveDirection == robotConfig::FORWARD) ? 
+                                 (leftTargetEncoder - anticipationTicks) : 
+                                 (leftTargetEncoder + anticipationTicks);
+                                 
+        long rightStopThreshold = (rightDriveDirection == robotConfig::FORWARD) ? 
+                                  (rightTargetEncoder - anticipationTicks) : 
+                                  (rightTargetEncoder + anticipationTicks);
+
+        bool leftDone = (leftDriveDirection == robotConfig::FORWARD) ? (leftCurrent >= leftStopThreshold) : (leftCurrent <= leftStopThreshold);
+        bool rightDone = (rightDriveDirection == robotConfig::FORWARD) ? (rightCurrent >= rightStopThreshold) : (rightCurrent <= rightStopThreshold);
 
         if (leftDone || rightDone) {
             leftMotor.drive(0, robotConfig::STOPPED);
@@ -147,34 +179,71 @@ void Drivetrain::update() {
     }
     
     // ---------------------------------------------------------
-    // STATE 2: Gentle Overshoot Correction (No PD Sync)
+    // STATE 2: Gentle Overshoot Correction 
     // ---------------------------------------------------------
     else if (state == Braking) {
         
-        // ONE-TIME SETTLING CHECK
+        // --- INFER MOVE TYPE EARLY ---
+        long expectedLeftDelta = leftTargetEncoder - leftStartEncoder;
+        long expectedRightDelta = rightTargetEncoder - rightStartEncoder;
+        bool wasTurnMove = ((expectedLeftDelta > 0) != (expectedRightDelta > 0));
+
+        // --- PRE-STOPPING COAST PHASE (Active Braking PD) ---
         if (targetSpeed == 0.0f) {
             float settleSpeedThreshold = 0.03f;
             if (abs(leftMotor.speed()) > settleSpeedThreshold || abs(rightMotor.speed()) > settleSpeedThreshold) {
-                return; 
+                
+                if (!wasTurnMove) {
+                    long leftDistanceMoved = abs(leftCurrent - leftStartEncoder);
+                    long rightDistanceMoved = abs(rightCurrent - rightStartEncoder);
+                    long posSyncError = leftDistanceMoved - rightDistanceMoved; 
+
+                    double leftCurrentSpeed = abs(leftMotor.speed());
+                    double rightCurrentSpeed = abs(rightMotor.speed());
+                    double velSyncError = leftCurrentSpeed - rightCurrentSpeed;
+
+                    int correction = (posSyncError * Kp_sync) + (velSyncError * Kv_sync);
+                    
+                    // --- NEW: Initial Guess Baseline ---
+                    int initialGuessPWM = 120; // Configurable constant
+                    
+                    // Left gets a negative base (forces opposite direction)
+                    // Right gets a positive base (forces same direction)
+                    int leftRawPWM = -initialGuessPWM - correction;
+                    int rightRawPWM = initialGuessPWM + correction;
+
+                    // If the math results in a negative PWM, we flip the direction to actively brake
+                    int leftCoastDir = leftDriveDirection;
+                    if (leftRawPWM < 0) {
+                        leftCoastDir = (leftDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                    }
+
+                    int rightCoastDir = rightDriveDirection;
+                    if (rightRawPWM < 0) {
+                        rightCoastDir = (rightDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                    }
+
+                    // Apply the absolute power to the assigned direction
+                    leftMotor.drive(constrain(abs(leftRawPWM), 0, robotConfig::MAX_DUTY), leftCoastDir);
+                    rightMotor.drive(constrain(abs(rightRawPWM), 0, robotConfig::MAX_DUTY), rightCoastDir);
+                } 
+                else {
+                    leftMotor.drive(0, robotConfig::STOPPED);
+                    rightMotor.drive(0, robotConfig::STOPPED);
+                }
+
+                return; // Wait for speed to drop below threshold
             }
             targetSpeed = -1.0f; 
         }
 
-        // --- INFER MOVE TYPE (No header changes required) ---
-        long expectedLeftDelta = leftTargetEncoder - leftStartEncoder;
-        long expectedRightDelta = rightTargetEncoder - rightStartEncoder;
-        // If one target went up and the other went down, it was a turn.
-        bool wasTurnMove = ((expectedLeftDelta > 0) != (expectedRightDelta > 0));
-
         // ==========================================
         // CONFIGURABLE BRAKING PARAMETERS
         // ==========================================
-        // Straight adjustments
         int straightDeadband = 40;
         int straightNudgePWM = 420;
-        float straightRightMultiplier = 1.1f;
+        float straightRightMultiplier = 1.07f;
         
-        // Turn adjustments
         int turnDeadband = 40;
         int turnNudgePWM = 480;
         float turnRightMultiplier = 1.07f;
@@ -190,6 +259,7 @@ void Drivetrain::update() {
         bool leftNeedsCorrection = abs(leftOvershoot) > activeDeadband;
         bool rightNeedsCorrection = abs(rightOvershoot) > activeDeadband;
 
+        // --- ORIGINAL INDEPENDENT NUDGING ---
         if (leftNeedsCorrection || rightNeedsCorrection) {
             
             if (leftNeedsCorrection) {
