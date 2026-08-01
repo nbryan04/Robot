@@ -21,7 +21,7 @@ public:
     static constexpr int FILTER_SIZE = 3; 
     static constexpr float SCALE_MULTIPLIER = 0.97;
     static constexpr float BASE_OFFSET = -0.47; 
-    static constexpr float MAX_VALID_DISTANCE = 30.0; 
+    static constexpr float MAX_VALID_DISTANCE = 20.0; 
     static constexpr float EDGE_JUMP_THRESHOLD = 4.0;
     static constexpr int DEBOUNCE_THRESHOLD = 1;
 

@@ -98,9 +98,18 @@ public:
     // (0-based): [0]=rock1 [1]=rock2 [2]=rock3 [3]=rock4 [4]=rock5 [5]=rock6. A
     // rock left false skips the sweep/travel/centre and goes straight to the scan
     // at the dead-reckoned arrival pose. Default: sweep every rock.
-    bool sweepOnRock[6] = { false, false, true, true, true, true };
+    bool sweepOnRock[6] = { false, false, false, true, true, true };
     bool enableTeletubbySweep = true;  // false: skip the camera sweep (n5)
     bool enableMetalScan = true;       // false: skip lower/scan/grab (n6-n10,n16)
+
+    // Panel line-acquire spin direction, per rock the robot heads to the panel
+    // FROM -- either an EARLY EXIT (both objectives met before rock 6) or rock 6's
+    // normal completion. The robot faces the panel line differently at each rock,
+    // so it spins CW (true) or CCW (false) to catch it. Indexed 0-based:
+    // [0]=rock1 [1]=rock2 [2]=rock3 [3]=rock4 [4]=rock5 [5]=rock6. Rock 1 is unused
+    // (can't have both objectives that early).
+    bool crestSpinCWByRock[6] = { false, true, false, false, true, false };
+    //                            rock1  r2    r3     r4     r5    r6
 
     // After rock 4, climb the ramp by FOLLOWING THE LINE (not dead reckoning),
     // detect the crest, then start the dead-reckoned hop to rock 5 (HOP_LEGS[4]).
@@ -210,6 +219,9 @@ private:
     // Ramp line-follow bookkeeping.
     float rampClimbOriginMM = 0.0f; // odometer baseline captured when the climb starts
     bool  rampWasTilted = false;    // tilt sensor latched onto the incline during the climb
+    float crestForwardOriginMM = 0.0f; // odometer at the crest; the momentum coast is measured from here
+    bool  absorbCrestMomentum = false; // hop-5's first drive rides the ramp momentum, then trims to distance
+    bool  crestSpinCW = false;         // active panel line-acquire spin direction (latched per rock)
 
     // Panel beacon-align bookkeeping.
     float irTriggerMM = 0.0f;       // odometer position where the beacon first crossed threshold
@@ -240,11 +252,11 @@ private:
     // HOP_LEG_COUNT says how many legs of each row are actually used.
     int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 2, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
-        { {0,260},{21, 185} },                 // -> rock 1
-        { {-45, 275},{45, 400},{-63,10} },                 // -> rock 2
-        { {37, 355}, },    // -> rock 3: two legs (turn right, then left)
+        { {0,250},{22, 185} },                 // -> rock 1
+        { {-45, 275},{45, 400},{-65,10} },                 // -> rock 2
+        { {44, 355}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
-        { {0, 160} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
+        { {0, 290} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
         { {90, 120} },                 // -> rock 6 (upper deck)
     };
     float HOP_TURN_SPEED  = 0.15;   // speed for the in-place turn portion of a hop leg
@@ -273,11 +285,10 @@ private:
     // Confirmation: after settling, require this many readings, spaced apart,
     // to ALL clear the threshold before we grab (rejects the lowering spike).
     int METAL_SAMPLE_COUNT = 3;
-    unsigned long METAL_SAMPLE_SPACING_MS = 500;
+    unsigned long METAL_SAMPLE_SPACING_MS = 200;
 
     unsigned long CAMERA_PRESCAN_DELAY_MS = 500; // settle before triggering the camera
-    unsigned long TELETUBBY_SCAN_MS = 1000; // hold still this long for the camera scan
-    unsigned long POINT_DWELL_MS = 600; // pause while pointing at a teletubby
+    unsigned long POINT_DWELL_MS = 300; // pause while pointing at a teletubby
 
     // Panel phase: rotate to find the tape, follow it, then stop on the IR beacon.
     // PWM duty is raw (0..MAX_DUTY = 1023); motors need ~350+ to move.
@@ -292,12 +303,6 @@ private:
     // threshold (it drifts past during the confirm windows + coast), so the final
     // stop is repeatable. Skip the reverse if the overshoot is under this (mm).
     float IR_ALIGN_DEADBAND_MM = 5.0f;
-
-    // Panel CREST: after the 6th rock, back up this far (mm) before hunting for the
-    // line. A crack in the course near the stopping point looks like the line to
-    // the LF, so backing off clears it before FIND_LINE spins. Only runs when all
-    // rocks are done (rocks_visited >= 6); 0 disables it.
-    float PANEL_PRECREST_BACKUP_MM = 200.0f;
 
     // Panel removal sequence (runs once the beacon trips in FOLLOW_LINE): lower
     // claw -> realign+pre-drive (one move to trigger + PREDRIVE) -> turn1 ->

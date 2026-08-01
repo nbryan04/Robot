@@ -95,7 +95,25 @@ void Mission::update() {
             // Turn finished (or none issued): drive this leg's straight segment.
             // Skip the drive on a zero-distance leg so a rotation-only leg works.
             if (driveIdle()) {
-                if (HOP_LEGS[idx][hopLeg].distMM != 0.0f) {
+                if (absorbCrestMomentum) {
+                    // First drive off the ramp crest: ride the climb momentum. Wait
+                    // for the coast to fully stop, then drive only the REMAINING
+                    // distance so the net forward from the crest equals this leg's
+                    // distance. A long coast just needs a small (or reverse) trim.
+                    float settleThresh = 0.03f;
+                    if (fabs(drive.leftMotor.speed())  > settleThresh ||
+                        fabs(drive.rightMotor.speed()) > settleThresh) {
+                        break;   // still coasting; keep waiting
+                    }
+                    float coasted = drive.forwardOdometryMM() - crestForwardOriginMM;
+                    float move = HOP_LEGS[idx][hopLeg].distMM - coasted;
+                    if (fabs(move) > 2.0f) {
+                        drive.driveStraight(move, HOP_DRIVE_SPEED);
+                    }
+                    Serial.printf("[RAMP] crest coast %.0f mm -> trim %.0f (target %.0f)\n",
+                                  coasted, move, HOP_LEGS[idx][hopLeg].distMM);
+                    absorbCrestMomentum = false;
+                } else if (HOP_LEGS[idx][hopLeg].distMM != 0.0f) {
                     drive.driveStraight(HOP_LEGS[idx][hopLeg].distMM, HOP_DRIVE_SPEED);
                 }
                 subStep = 2;
@@ -338,16 +356,20 @@ void Mission::update() {
         bool crestedByDist = (climbed >= RAMP_CLIMB_MAX_MM);
 
         if (crestedByTilt || crestedByDist) {
+            // Cut power but DON'T hard-stop: let the climb momentum coast us forward.
+            // The hop-5 first drive absorbs that coast and trims to the leg distance
+            // (like the panel's first move), instead of braking then driving cold.
             drive.leftMotor.drive(0, robotConfig::STOPPED);
             drive.rightMotor.drive(0, robotConfig::STOPPED);
-            drive.stop();
             line.stop();
             if (robotConfig::IR_ADC_PIN >= 0) ir.stop();
             level = UPPER;              // on the upper deck now
+            crestForwardOriginMM = drive.forwardOdometryMM();  // measure the coast from here
+            absorbCrestMomentum = true;
             if (pauseAtCrest) {
                 enter(HOLD);            // TEMP: stop at the crest for testing
             } else {
-                enter(HOP_TO_CLUSTER);  // start the hop to rock 5 (HOP_LEGS[4])
+                enter(HOP_TO_CLUSTER);  // hop to rock 5 (HOP_LEGS[4]); first drive rides the momentum
             }
         }
         break;
@@ -450,20 +472,12 @@ void Mission::update() {
             subStep = 1;
         } else if (subStep == 1) {
             if (millis() - stateTimer >= CAMERA_PRESCAN_DELAY_MS) {
-                // Trigger a camera scan, then hold still for 2 s to let it look.
-                // The camera link is one-way for now (checkForTeletubby fires the
-                // request and always reports false), so nothing is counted yet --
-                // the structure is here for when it reports a real result.
-                // (POINT_TELETUBBY / RECENTRE_ROCK below are unused until the
-                // camera can give a bearing to point at.)
+                // Trigger the camera; checkForTeletubby() blocks until it replies
+                // (or times out), so there's no need to hold afterward -- move
+                // straight on to the metal check once we have the answer.
                 if (teletubbies < 2 && camera.checkForTeletubby()) {
                     teletubbies += 1;
                 }
-                stateTimer = millis();
-                subStep = 2;
-            }
-        } else {  // subStep == 2: hold for the scan window
-            if (millis() - stateTimer >= TELETUBBY_SCAN_MS) {
                 enter(NEED_METAL);
             }
         }
@@ -623,6 +637,21 @@ void Mission::update() {
         // subStep 2-3: undo the net rotation the sweep/approach added, so the
         //   next hop is measured from the heading we ARRIVED with.
         if (subStep == 0) {
+            // Latch the panel line-acquire spin direction for the rock we just
+            // finished (the robot faces differently at each). Used if we divert to
+            // the panel now (early exit) or at rock 6's normal completion.
+            crestSpinCW = crestSpinCWByRock[rocks_visited <= 5 ? rocks_visited : 5];
+
+            // EARLY EXIT: both objectives met (metal rock + both teletubbies) ->
+            // abandon the remaining rocks and head straight to the panel via the
+            // one continuous line. Rock 6 (rocks_visited == 5) always takes the
+            // normal completion path below instead (so its crest backup still runs).
+            if (rock == 1 && teletubbies >= 2 && rocks_visited < 5) {
+                phase = PANEL;
+                enter(CREST);   // panel line-find (spins crestSpinCW) -> follow -> removal
+                break;
+            }
+
             // Rocks 4 and 6 (rocks_visited 3 and 5 here, before it is incremented)
             // are each followed immediately by a crest that re-acquires position
             // from the line (ramp line-follow after rock 4, panel line-find after
@@ -731,33 +760,19 @@ void Mission::update() {
 
     // ---- n26: Crest: on the upper deck, head for the panel ----------------
     case CREST:
-        if (subStep == 0) {
-            level = UPPER;
-            // On the 6th rock (collection done), back up first so FIND_LINE's spin
-            // doesn't latch onto a crack in the course near the stop point that
-            // looks like the line. Only here, not at the other rocks.
-            if (rocks_visited >= 6 && PANEL_PRECREST_BACKUP_MM != 0.0f) {
-                drive.driveStraight(-PANEL_PRECREST_BACKUP_MM, CENTRE_SPEED);
-                subStep = 1;
-            } else {
-                subStep = 2;   // no backup: fall straight into the line hunt
-            }
-        } else if (subStep == 1) {
-            if (!driveIdle()) break;   // wait for the backup to finish
-            subStep = 2;
-        } else {  // subStep == 2: start the line hunt
-            // Kick off the IR beacon search now (latches 1kHz/10kHz from the
-            // hardware select pin and starts background DMA sampling). Guarded:
-            // begin()/start abort on an unset pin, so only touch it once wired.
-            if (robotConfig::IR_ADC_PIN >= 0) ir.startSearch();
-            enter(FIND_LINE);   // panel phase: find the line, then follow it to the panel
-        }
+        level = UPPER;
+        // Kick off the IR beacon search now (latches 1kHz/10kHz from the hardware
+        // select pin and starts background DMA sampling). Guarded: begin()/start
+        // abort on an unset pin, so only touch it once IR_ADC_PIN is wired.
+        if (robotConfig::IR_ADC_PIN >= 0) ir.startSearch();
+        enter(FIND_LINE);   // panel phase: find the line, then follow it to the panel
         break;
 
     // ---- Panel: rotate to acquire the tape --------------------------------
-    // Spin in place (negative/CCW) until any LF sensor sees the tape, then follow
-    // it. Motors are driven directly, so the drivetrain state machine is parked
-    // Idle (drive.stop) to keep it out of the way.
+    // Spin in place until any LF sensor sees the tape, then follow it. The spin
+    // direction (crestSpinCW: CW or CCW) is chosen per rock we came from, since the
+    // robot faces the panel line differently at each. Motors are driven directly,
+    // so the drivetrain state machine is parked Idle (drive.stop) to keep it away.
     case FIND_LINE:
         if (subStep == 0) {
             drive.stop();       // park the drivetrain loop; we drive motors directly
@@ -769,8 +784,12 @@ void Mission::update() {
                 drive.leftMotor.drive(0, robotConfig::STOPPED);
                 drive.rightMotor.drive(0, robotConfig::STOPPED);
                 enter(FOLLOW_LINE);
+            } else if (crestSpinCW) {
+                // CW in-place rotation: left wheel fwd, right wheel back.
+                drive.leftMotor.drive(LINE_SEEK_PWM, robotConfig::FORWARD);
+                drive.rightMotor.drive((int)(LINE_SEEK_PWM * LINE_RIGHT_SCALE), robotConfig::REVERSE);
             } else {
-                // Negative / CCW in-place rotation: left wheel back, right wheel fwd.
+                // CCW in-place rotation: left wheel back, right wheel fwd.
                 // Right motor is weaker, so scale its PWM up to keep the spin even.
                 drive.leftMotor.drive(LINE_SEEK_PWM, robotConfig::REVERSE);
                 drive.rightMotor.drive((int)(LINE_SEEK_PWM * LINE_RIGHT_SCALE), robotConfig::FORWARD);
@@ -790,8 +809,13 @@ void Mission::update() {
 
         line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());  // LF from the IR scan
         double corr = line.getCorrection();
-        int leftPWM  = constrain((int)(LINE_BASE_PWM + corr), 0, robotConfig::MAX_DUTY);
-        int rightPWM = constrain((int)(LINE_BASE_PWM - corr), 0, robotConfig::MAX_DUTY);
+        // On an early exit the continuous panel line can run up the ramp: use the
+        // stronger ramp PWM while the tilt sensor says we're on the incline, then
+        // drop back to the slower panel speed on the flat at the top. Harmless for
+        // the normal (already-upper-deck) case -- it just stays on LINE_BASE_PWM.
+        int base = (tilt.isPresent() && tilt.isOnRamp()) ? RAMP_BASE_PWM : LINE_BASE_PWM;
+        int leftPWM  = constrain((int)(base + corr), 0, robotConfig::MAX_DUTY);
+        int rightPWM = constrain((int)(base - corr), 0, robotConfig::MAX_DUTY);
         drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
         drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
 
