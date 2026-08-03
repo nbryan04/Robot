@@ -252,9 +252,9 @@ private:
     // HOP_LEG_COUNT says how many legs of each row are actually used.
     int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 2, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
-        { {0,250},{22, 185} },                 // -> rock 1
-        { {-45, 275},{45, 400},{-65,10} },                 // -> rock 2
-        { {44, 355}, },    // -> rock 3: two legs (turn right, then left)
+        { {0,270},{21, 175} },                 // -> rock 1
+        { {-45, 275},{45, 400},{-61,10} },                 // -> rock 2
+        { {42, 355}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
         { {0, 290} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
         { {90, 120} },                 // -> rock 6 (upper deck)

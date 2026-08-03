@@ -138,7 +138,7 @@ void Drivetrain::update() {
         float expectedOvershootMM = 0.0f;
         
         if (state == DrivingStraight) {
-            expectedOvershootMM = (312.5f * targetSpeed) - 12.5f;
+            expectedOvershootMM = (237.5f * targetSpeed);
             if (expectedOvershootMM < 0.0f) expectedOvershootMM = 0.0f; 
             
             float totalMoveMM = (float)totalMoveTicks * (robotConfig::WHEEL_1_CIRCUMFERENCE / (float)robotConfig::PULSES_REV);
@@ -241,11 +241,11 @@ void Drivetrain::update() {
         // CONFIGURABLE BRAKING PARAMETERS
         // ==========================================
         int straightDeadband = 40;
-        int straightNudgePWM = 420;
+        int straightNudgePWM = 470;
         float straightRightMultiplier = 1.07f;
         
         int turnDeadband = 40;
-        int turnNudgePWM = 480;
+        int turnNudgePWM = 500;
         float turnRightMultiplier = 1.07f;
         // ==========================================
 
