@@ -204,15 +204,11 @@ void Drivetrain::update() {
 
                     int correction = (posSyncError * Kp_sync) + (velSyncError * Kv_sync);
                     
-                    // --- NEW: Initial Guess Baseline ---
                     int initialGuessPWM = 120; // Configurable constant
                     
-                    // Left gets a negative base (forces opposite direction)
-                    // Right gets a positive base (forces same direction)
                     int leftRawPWM = -initialGuessPWM - correction;
                     int rightRawPWM = initialGuessPWM + correction;
 
-                    // If the math results in a negative PWM, we flip the direction to actively brake
                     int leftCoastDir = leftDriveDirection;
                     if (leftRawPWM < 0) {
                         leftCoastDir = (leftDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
@@ -223,7 +219,6 @@ void Drivetrain::update() {
                         rightCoastDir = (rightDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
                     }
 
-                    // Apply the absolute power to the assigned direction
                     leftMotor.drive(constrain(abs(leftRawPWM), 0, robotConfig::MAX_DUTY), leftCoastDir);
                     rightMotor.drive(constrain(abs(rightRawPWM), 0, robotConfig::MAX_DUTY), rightCoastDir);
                 } 
@@ -279,7 +274,14 @@ void Drivetrain::update() {
         } else {
             leftMotor.drive(0, robotConfig::STOPPED);
             rightMotor.drive(0, robotConfig::STOPPED);
-            state = Idle;
+            
+            // --- NEW: Final Complete Stop Check ---
+            // Ensures momentum from the nudge has completely settled before declaring Idle.
+            // Using 0.01f to account for extreme micro-movements or minor sensor noise.
+            float finalStopThreshold = 0.01f;
+            if (abs(leftMotor.speed()) < finalStopThreshold && abs(rightMotor.speed()) < finalStopThreshold) {
+                state = Idle;
+            }
         }
     }
 }
