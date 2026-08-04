@@ -10,20 +10,6 @@
 #include "ir_sensor.h"
 #include "mission.h"
 #include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-
-// ---------------------------------------------------------------------------
-// OLED (SSD1306 over I2C: SDA = 6, SCL = 5, address 0x3C)
-// ---------------------------------------------------------------------------
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_SDA 6
-#define OLED_SCL 5
-#define OLED_RESET -1
-Adafruit_SSD1306 display_handler(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
 
 // ---------------------------------------------------------------------------
 // Pin definitions
@@ -52,6 +38,12 @@ const int LF_LEFT_PIN       = 7;
 const int LF_MID_PIN        = 8;
 const int LF_RIGHT_PIN      = 9;
 
+// Competition-surface select. The two surfaces differ ONLY in the solar-panel
+// removal sequence; this pin (read once at boot) picks which parameter set the
+// mission uses. INPUT_PULLUP: open/HIGH = surface 1, tied to GND/LOW = surface 2.
+// (GPIO 6 is free now that the OLED is gone.)
+const int SURFACE_SELECT_PIN = 6;
+
 // ---------------------------------------------------------------------------
 // Object instantiation
 // ---------------------------------------------------------------------------
@@ -73,107 +65,8 @@ IR_Sensor    irSensor(robotConfig::IR_ADC_PIN, robotConfig::IR_SELECT_PIN,
 
 Mission mission(drivetrain, ultrasonic, camera, claw, metalDetector, tiltSensor, lineFollower, irSensor);
 
-void oledSetup() {
-    Wire.begin(OLED_SDA, OLED_SCL);
-    Wire.setClock(400000);   // fast I2C so screen writes disturb the loop less
-    display_handler.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-    display_handler.clearDisplay();
-    display_handler.setTextSize(1);
-    display_handler.setTextColor(SSD1306_WHITE);
-    display_handler.setCursor(0, 0);
-    display_handler.println("System Ready");
-    display_handler.display();
-}
-
-// Show the metal detector's frequency shift (and context) while scanning a rock.
-void showMetalShift() {
-    display_handler.clearDisplay();
-    display_handler.setTextSize(1);
-    display_handler.setTextColor(SSD1306_WHITE);
-    display_handler.setCursor(0, 0);
-    display_handler.println("Metal scan");
-    display_handler.print("Shift: ");
-    display_handler.print(metalDetector.getShift(), 1);
-    display_handler.println(" Hz");
-    display_handler.print("Cur:  ");
-    display_handler.println(metalDetector.getCurrentFrequency(), 1);
-    display_handler.print("Base: ");
-    display_handler.println(metalDetector.getBaseFrequency(), 1);
-    display_handler.print("Metal: ");
-    display_handler.println(metalDetector.isMetalDetected() ? "YES" : "no");
-    display_handler.display();
-}
-
-// Show the ultrasonic distance (filtered + raw) for debugging the sweep/approach.
-void showUltrasonic() {
-    display_handler.clearDisplay();
-    display_handler.setTextColor(SSD1306_WHITE);
-    display_handler.setTextSize(1);
-    display_handler.setCursor(0, 0);
-    display_handler.println("Ultrasonic (cm)");
-    display_handler.setTextSize(2);
-    display_handler.setCursor(0, 18);
-    display_handler.println(ultrasonic.filteredDistanceCm, 1);
-    display_handler.setTextSize(1);
-    display_handler.setCursor(0, 48);
-    display_handler.print("raw ");
-    display_handler.println(ultrasonic.currentDistanceCm, 1);
-    display_handler.display();
-}
-
-// Show the most recent sweep edge (start/end) and how many degrees into the
-// sweep arc it was detected. Called from loop() whenever a new edge fires.
-void showEdgeEvent() {
-    display_handler.clearDisplay();
-    display_handler.setTextColor(SSD1306_WHITE);
-    display_handler.setTextSize(2);
-    display_handler.setCursor(0, 0);
-    if (mission.lastEdgeEvent == Ultrasonic::START_EDGE) {
-        display_handler.println("START");
-    } else if (mission.lastEdgeEvent == Ultrasonic::END_EDGE) {
-        display_handler.println("END");
-    } else {
-        display_handler.println("--");
-    }
-    display_handler.println("edge");
-    display_handler.setTextSize(1);
-    display_handler.setCursor(0, 50);
-    display_handler.print("d = ");
-    display_handler.print(mission.lastEdgeDeltaDeg, 1);
-    display_handler.println(" deg");
-    display_handler.display();
-}
-
-// Show the finished sweep's result: the start/end edge angles and the distance
-// the robot thinks the rock is at. Drawn once per sweep and left on screen.
-void showSweepResult() {
-    display_handler.clearDisplay();
-    display_handler.setTextColor(SSD1306_WHITE);
-    display_handler.setTextSize(1);
-    display_handler.setCursor(0, 0);
-    display_handler.println(mission.sweepFound ? "ROCK FOUND" : "NO ROCK");
-
-    display_handler.setCursor(0, 18);
-    display_handler.print("Start: ");
-    display_handler.print(mission.sweepStartAngle, 1);
-    display_handler.println(" deg");
-
-    display_handler.setCursor(0, 32);
-    display_handler.print("End:   ");
-    display_handler.print(mission.sweepEndAngle, 1);
-    display_handler.println(" deg");
-
-    display_handler.setCursor(0, 46);
-    display_handler.print("Dist:  ");
-    display_handler.print(mission.sweepDistanceCm, 1);
-    display_handler.println(" cm");
-
-    display_handler.display();
-}
-
 void setup() {
     Serial.begin(115200);   // USB CDC: sweep-test debug output
-    // oledSetup();  // OLED off
     motorLeft.begin();
     motorRight.begin();
     ultrasonic.begin();
@@ -197,7 +90,7 @@ void setup() {
     mission.sweepOnRock[0] = false;  // rock 1
     mission.sweepOnRock[1] = false;  // rock 2
     mission.sweepOnRock[2] = false;   // rock 3
-    mission.sweepOnRock[3] = true;   // rock 4
+    mission.sweepOnRock[3] = false;   // rock 4
     mission.sweepOnRock[4] = true;   // rock 5
     mission.sweepOnRock[5] = true;   // rock 6
     mission.enableTeletubbySweep = true;   // ~5s camera scan once aligned on the rock
@@ -206,9 +99,16 @@ void setup() {
     mission.aimMode = Mission::AIM_EDGE_MIDPOINT;  // aim at the midpoint of the two edges
     mission.returnAfterCentre = true;         // realign: reverse the travel/centre distance back to the arrival pose
 
+    // Surface select (read once at boot): open/HIGH = surface 1, GND/LOW = surface 2.
+    // Only the solar-panel removal parameters differ between the two.
+    pinMode(SURFACE_SELECT_PIN, INPUT_PULLUP);
+    mission.panelSurface = (digitalRead(SURFACE_SELECT_PIN) == LOW) ? 1 : 0;
+    Serial.printf("[SURFACE] pin%d %s -> surface %d\n", SURFACE_SELECT_PIN,
+                  mission.panelSurface == 1 ? "LOW" : "HIGH", mission.panelSurface + 1);
+
     // TEST: panel phase. Jump straight to CREST -> FIND_LINE -> FOLLOW_LINE so the
     // IR beacon detection can be tuned. Set back to COLLECT for a real run.
-    mission.phase = Mission::COLLECT;
+    mission.phase = Mission::PANEL;
 
     mission.begin();
 }

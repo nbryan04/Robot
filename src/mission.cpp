@@ -186,7 +186,7 @@ void Mission::update() {
             // flicker into one span) and validate by angular width below.
             Ultrasonic::EdgeEvent e = ultra.checkEdgeEvents();
             float h = sweepHeadingDeg(SWEEP_ARC);
-            // Latch EVERY edge (accepted or not) for the OLED debug view: which
+            // Latch EVERY edge (accepted or not) for debug/inspection: which
             // edge it was and how many degrees into the sweep arc it fired.
             if (e == Ultrasonic::START_EDGE || e == Ultrasonic::END_EDGE) {
                 lastEdgeEvent    = e;
@@ -236,7 +236,7 @@ void Mission::update() {
                 float rockWidth = endEdgeAngle - startEdgeAngle;
                 if (rockWidth < 0) rockWidth = -rockWidth;
 
-                // Publish the sweep result for the OLED summary (angles as deg
+                // Publish the sweep result for debug/inspection (angles as deg
                 // into the sweep arc; distance = closest reading seen).
                 sweepFound = (foundStartEdge && foundEndEdge && rockWidth >= MIN_ROCK_ANGLE);
                 sweepStartAngle = startEdgeAngle;
@@ -652,12 +652,13 @@ void Mission::update() {
                 break;
             }
 
-            // Rocks 4 and 6 (rocks_visited 3 and 5 here, before it is incremented)
-            // are each followed immediately by a crest that re-acquires position
-            // from the line (ramp line-follow after rock 4, panel line-find after
-            // rock 6). The realignment back to the arrival pose is therefore wasted
-            // time -- skip it and head straight for the crest to save run time.
-            if (rocks_visited == 3 || rocks_visited == 5) {
+            // Skip the post-rock realignment for rocks 4, 5 and 6 (rocks_visited
+            // 3, 4, 5 here, before it is incremented). Rocks 4 and 6 are each
+            // followed immediately by a crest that re-acquires position from the
+            // line, so the realign is wasted; rock 5 is skipped too by request --
+            // its hop to rock 6 (HOP_LEGS[5]) is then measured from the post-collection
+            // pose rather than the arrival pose.
+            if (rocks_visited == 3 || rocks_visited == 4 || rocks_visited == 5) {
                 if (stopAfterRock) {
                     enter(HOLD);
                 } else {
@@ -846,27 +847,25 @@ void Mission::update() {
         break;
     }
 
-    // ---- Panel: removal sequence (claw + drive interleaved) ---------------
-    // Runs once the beacon trips. The FIRST movement doubles as the realignment:
-    // rather than reversing to the trigger point and then pre-driving forward, we
-    // drive straight in ONE move to (trigger + pre-drive), correcting the coast
-    // overshoot and doing the pre-drive at once. Then: turn1 -> drive -> turn2.
-    // The HAND stays CLOSED for the whole procedure; the arm just lowers to
-    // PANEL_ARM_ANGLE (hover) and holds it out. Closed-loop drivetrain moves so
-    // each leg is precise.
+    // ---- Panel: removal by drive-into-stall + sweep -----------------------
+    // Runs once the beacon trips. The line->panel distance is inconsistent, so we
+    // FIND the panel by driving into it: turn toward panel -> drive forward until
+    // the wheels stall against it -> back up a set distance -> lower the claw ->
+    // sweep it off with a turn. Claw is raised (from collection) through the
+    // approach so the body finds the panel, then lowered only for the sweep.
     case PANEL_REMOVE:
         if (subStep == 0) {
             // Hand CLOSED the whole time; lower the arm to the panel (hover) angle.
             claw.setAngle(claw.hpin, robotConfig::HAND_CLOSE_ANGLE);
-            claw.setAngle(claw.apin, PANEL_ARM_ANGLE);
-            Serial.println("[PANEL] lower to panel angle (hand closed)");
+            claw.setAngle(claw.apin, panel().armAngle);
+            Serial.printf("[PANEL] surface %d: lower to panel angle (hand closed)\n", panelSurface + 1);
             stateTimer = millis();
             subStep = 1;
         } else if (subStep == 1) {
             // Wait for the arm to settle AND the forward coast to fully stop before
             // measuring the odometer (a mid-coast read under-corrects). Then the
             // realign IS the first movement: one straight move to trigger+pre-drive.
-            if (millis() - stateTimer < PANEL_ARM_SETTLE_MS) break;
+            if (millis() - stateTimer < panel().armSettleMs) break;
             float settleThresh = 0.03f;
             if (fabs(drive.leftMotor.speed())  > settleThresh ||
                 fabs(drive.rightMotor.speed()) > settleThresh) {
@@ -876,20 +875,20 @@ void Mission::update() {
             // positive drives forward, negative trims the overshoot back.
             float move;
             if (irTriggerValid) {
-                move = (irTriggerMM + PANEL_REMOVE_PREDRIVE_MM) - drive.forwardOdometryMM();
+                move = (irTriggerMM + panel().predriveMM) - drive.forwardOdometryMM();
             } else {
-                move = PANEL_REMOVE_PREDRIVE_MM;  // no trigger latched: plain pre-drive
+                move = panel().predriveMM;  // no trigger latched: plain pre-drive
             }
             if (fabs(move) > IR_ALIGN_DEADBAND_MM) {
-                drive.driveStraight(move, PANEL_REMOVE_DRIVE_SPEED);
+                drive.driveStraight(move, panel().driveSpeed);
             }
             Serial.printf("[PANEL] realign + pre-drive: %.1f mm\n", move);
             subStep = 2;
         } else if (subStep == 2) {
             // Pre-drive done: first turn.
             if (driveIdle()) {
-                if (PANEL_REMOVE_TURN1_DEG != 0.0f) {
-                    drive.turn(PANEL_REMOVE_TURN1_DEG, PANEL_REMOVE_TURN_SPEED);
+                if (panel().turn1Deg != 0.0f) {
+                    drive.turn(panel().turn1Deg, panel().turnSpeed);
                 }
                 Serial.println("[PANEL] turn 1");
                 subStep = 3;
@@ -897,8 +896,8 @@ void Mission::update() {
         } else if (subStep == 3) {
             // First turn done: drive straight (hand stays closed throughout).
             if (driveIdle()) {
-                if (PANEL_REMOVE_DRIVE_MM != 0.0f) {
-                    drive.driveStraight(PANEL_REMOVE_DRIVE_MM, PANEL_REMOVE_DRIVE_SPEED);
+                if (panel().driveMM != 0.0f) {
+                    drive.driveStraight(panel().driveMM, panel().driveSpeed);
                 }
                 Serial.println("[PANEL] drive straight (hand closed)");
                 subStep = 4;
@@ -906,8 +905,8 @@ void Mission::update() {
         } else if (subStep == 4) {
             // Final turn, claw still out and closed.
             if (driveIdle()) {
-                if (PANEL_REMOVE_TURN2_DEG != 0.0f) {
-                    drive.turn(PANEL_REMOVE_TURN2_DEG, PANEL_REMOVE_TURN_SPEED);
+                if (panel().turn2Deg != 0.0f) {
+                    drive.turn(panel().turn2Deg, panel().turnSpeed);
                 }
                 Serial.println("[PANEL] turn 2 (final)");
                 subStep = 5;

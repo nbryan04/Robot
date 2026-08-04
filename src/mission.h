@@ -27,6 +27,20 @@ struct HopLeg {
     float distMM;
 };
 
+// All constants for the solar-panel removal "dance". There are two competition
+// surfaces that differ ONLY in this sequence, so each surface gets its own set
+// (selected at boot by the surface-select pin). Angles: + = right/CW, - = left/CCW.
+struct PanelRemoveParams {
+    float predriveMM;   // short straight (realign target = beacon trigger + this) before turn1
+    float turn1Deg;     // first turn off the beacon spot
+    float driveMM;      // straight leg (through the arch) after turn1
+    float turn2Deg;     // second turn to finish the sequence
+    float turnSpeed;    // speed for the two turns
+    float driveSpeed;   // speed for the straight legs
+    int   armAngle;     // arm hover angle over the panel (hand stays closed)
+    unsigned long armSettleMs;  // time for the arm to reach that angle
+};
+
 class Mission {
 public:
     static constexpr int MAX_HOP_LEGS = 3;  // max legs any one cluster can use
@@ -64,7 +78,7 @@ public:
         CREST,            // n26: on the upper deck; hand off to the panel line
         FIND_LINE,        // rotate (negative/CCW) until the LF sees the tape
         FOLLOW_LINE,      // follow the tape until the IR panel beacon reads high
-        PANEL_REMOVE,     // removal: first move realigns to (trigger + pre-drive), then turn -> drive -> turn
+        PANEL_REMOVE,     // removal dance: lower -> realign+predrive -> turn1 -> drive -> turn2
         // --- ramp climb via line following (COLLECT, after rock 4) ---
         RAMP_FIND_LINE,   // rotate until the LF sees the tape at the ramp foot
         RAMP_FOLLOW_LINE, // follow the tape up the ramp until the crest, then hop to rock 5
@@ -98,9 +112,14 @@ public:
     // (0-based): [0]=rock1 [1]=rock2 [2]=rock3 [3]=rock4 [4]=rock5 [5]=rock6. A
     // rock left false skips the sweep/travel/centre and goes straight to the scan
     // at the dead-reckoned arrival pose. Default: sweep every rock.
-    bool sweepOnRock[6] = { false, false, false, true, true, true };
+    bool sweepOnRock[6] = { false, false, false, false, true, true };
     bool enableTeletubbySweep = true;  // false: skip the camera sweep (n5)
     bool enableMetalScan = true;       // false: skip lower/scan/grab (n6-n10,n16)
+
+    // Competition-surface select: 0 = surface 1, 1 = surface 2. The two surfaces
+    // differ ONLY in the solar-panel removal dance (see panelParams). main.cpp sets
+    // this at boot from the surface-select pin.
+    int panelSurface = 0;
 
     // Panel line-acquire spin direction, per rock the robot heads to the panel
     // FROM -- either an EARLY EXIT (both objectives met before rock 6) or rock 6's
@@ -162,10 +181,10 @@ public:
 
     State state = ROUTER;
 
-    // ---- OLED edge-event debug (updated live during the FIND_ROCK sweep) ----
+    // ---- Edge-event debug (updated live during the FIND_ROCK sweep) ----
     // Every start/end edge the sweep detects (whether or not the accept logic
-    // keeps it) is latched here so the caller (main) can show it on the OLED.
-    // edgeEventSeq bumps on each edge so loop() can tell when a new one fired.
+    // keeps it) is latched here for debug/inspection.
+    // edgeEventSeq bumps on each edge so a caller can tell when a new one fired.
     Ultrasonic::EdgeEvent lastEdgeEvent = Ultrasonic::NONE;
     float         lastEdgeDeltaDeg = 0.0f;  // deg from the start of the sweep arc
     unsigned long edgeEventSeq = 0;         // increments on each detected edge
@@ -252,11 +271,11 @@ private:
     // HOP_LEG_COUNT says how many legs of each row are actually used.
     int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 2, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
-        { {0,270},{21, 175} },                 // -> rock 1
-        { {-45, 275},{45, 400},{-61,10} },                 // -> rock 2
-        { {42, 355}, },    // -> rock 3: two legs (turn right, then left)
+        { {0,583},{20.5, 175} },                 // -> rock 1
+        { {-45, 275},{45, 400},{-65,10} },                 // -> rock 2
+        { {39.5, 340}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 295} },                 // -> rock 4
-        { {0, 290} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
+        { {0, 220} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
         { {90, 120} },                 // -> rock 6 (upper deck)
     };
     float HOP_TURN_SPEED  = 0.15;   // speed for the in-place turn portion of a hop leg
@@ -304,21 +323,20 @@ private:
     // stop is repeatable. Skip the reverse if the overshoot is under this (mm).
     float IR_ALIGN_DEADBAND_MM = 5.0f;
 
-    // Panel removal sequence (runs once the beacon trips in FOLLOW_LINE): lower
-    // claw -> realign+pre-drive (one move to trigger + PREDRIVE) -> turn1 ->
-    // drive straight -> turn2. Angles: + = right/CW, - = left/CCW.
-    float PANEL_REMOVE_PREDRIVE_MM = 50.0f;  // short straight after lowering, before turn1
-    float PANEL_REMOVE_TURN1_DEG  = 85.0f;   // first turn off the beacon spot
-    float PANEL_REMOVE_DRIVE_MM   = 135.0f;  // straight leg (through the arch) after turn1
-    float PANEL_REMOVE_TURN2_DEG  = -90.0f;   // second turn to finish the sequence
-    float PANEL_REMOVE_TURN_SPEED = 0.22f;   // speed for the two turns
-    float PANEL_REMOVE_DRIVE_SPEED = 0.15f;  // speed for the straight leg
+    // Panel removal "dance" (runs once the beacon trips in FOLLOW_LINE): lower the
+    // arm (hand stays closed), realign to the beacon trigger + a short pre-drive,
+    // then turn1 -> straight -> turn2 to sweep the panel off. The TWO competition
+    // surfaces differ ONLY here, so each has its own parameter set; the active one
+    // is chosen at boot by panelSurface (0 = surface 1, 1 = surface 2), which
+    // main.cpp sets from the surface-select pin. Fields: see PanelRemoveParams.
+    //                                  predrive turn1  drive  turn2  tSpd  dSpd  arm settle
+    PanelRemoveParams panelParams[2] = {
+        /* surface 1 */ {  35.0f, 85.0f, 135.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
+        /* surface 2 */ {  35.0f, 85.0f, 135.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
+    };
 
-    // Claw during the panel removal. The HAND stays CLOSED for the whole procedure
-    // (never opens). The arm just lowers to PANEL_ARM_ANGLE -- the claw's HOVER
-    // angle (ARM_DOWN + 45 = 55) -- and holds it out through every leg.
-    int  PANEL_ARM_ANGLE = 45;                // hover angle (ARM_DOWN_ANGLE + 45)
-    unsigned long PANEL_ARM_SETTLE_MS = 700;  // time for the arm to reach the panel angle
+    // The active surface's removal parameters (panelSurface is public config below).
+    PanelRemoveParams& panel() { return panelParams[panelSurface]; }
 
     // Ramp climb via line following (after rock 4). The crest is detected by the
     // tilt sensor (latched onto the incline, then back to flat). Until the IMU is

@@ -26,7 +26,14 @@ void Drivetrain::driveStraight(float distanceMM, float speed) {
 
     leftMotor.drive(leftMotor.mapSpeedToDutyCycle(targetSpeed), leftDriveDirection);
     rightMotor.drive(rightMotor.mapSpeedToDutyCycle(targetSpeed), rightDriveDirection);
-    
+
+    // Arm the stall watch for this move.
+    stallRefLeft = leftStartEncoder;
+    stallRefRight = rightStartEncoder;
+    stallSinceMs = millis();
+    stallLastBoostMs = millis();
+    stallBoost = 0;
+
     state = DrivingStraight;
 }
 
@@ -60,7 +67,14 @@ void Drivetrain::turn(float degrees, float speed) {
 
     leftMotor.drive(leftMotor.mapSpeedToDutyCycle(targetSpeed), leftDriveDirection);
     rightMotor.drive(rightMotor.mapSpeedToDutyCycle(targetSpeed), rightDriveDirection);
-    
+
+    // Arm the stall watch for this move.
+    stallRefLeft = leftStartEncoder;
+    stallRefRight = rightStartEncoder;
+    stallSinceMs = millis();
+    stallLastBoostMs = millis();
+    stallBoost = 0;
+
     state = Turning;
 }
 
@@ -115,8 +129,24 @@ void Drivetrain::update() {
             activeTargetSpeed = minSafeSpeed + ((targetSpeed - minSafeSpeed) * progress);
         }
 
-        int leftBasePWM = leftMotor.mapSpeedToDutyCycle(activeTargetSpeed);
-        int rightBasePWM = rightMotor.mapSpeedToDutyCycle(activeTargetSpeed);
+        // --- Stall recovery: if neither encoder has moved for STALL_TIMEOUT_MS,
+        // ramp an extra PWM boost until motion resumes (or we hit the cap). Reset
+        // the watch (and drop the boost) as soon as the wheels are turning. ---
+        unsigned long nowMs = millis();
+        if (abs(leftCurrent - stallRefLeft) > STALL_TICKS ||
+            abs(rightCurrent - stallRefRight) > STALL_TICKS) {
+            stallRefLeft = leftCurrent;
+            stallRefRight = rightCurrent;
+            stallSinceMs = nowMs;
+            stallBoost = 0;
+        } else if (nowMs - stallSinceMs >= STALL_TIMEOUT_MS &&
+                   nowMs - stallLastBoostMs >= STALL_BOOST_INTERVAL_MS) {
+            stallBoost = min(stallBoost + STALL_BOOST_STEP, STALL_MAX_BOOST);
+            stallLastBoostMs = nowMs;
+        }
+
+        int leftBasePWM = leftMotor.mapSpeedToDutyCycle(activeTargetSpeed) + stallBoost;
+        int rightBasePWM = rightMotor.mapSpeedToDutyCycle(activeTargetSpeed) + stallBoost;
 
         long leftDistanceMoved = abs(leftCurrent - leftStartEncoder);
         long rightDistanceMoved = abs(rightCurrent - rightStartEncoder);
@@ -229,7 +259,14 @@ void Drivetrain::update() {
 
                 return; // Wait for speed to drop below threshold
             }
-            targetSpeed = -1.0f; 
+            targetSpeed = -1.0f;
+            // Arm the stall watch fresh for the NUDGE phase (the pre-stop coast
+            // above is intentionally left out of stall recovery).
+            stallRefLeft = leftCurrent;
+            stallRefRight = rightCurrent;
+            stallSinceMs = millis();
+            stallLastBoostMs = millis();
+            stallBoost = 0;
         }
 
         // ==========================================
@@ -248,29 +285,44 @@ void Drivetrain::update() {
         int activeNudgePWM = wasTurnMove ? turnNudgePWM : straightNudgePWM;
         float activeRightMultiplier = wasTurnMove ? turnRightMultiplier : straightRightMultiplier;
 
+        // --- Stall recovery for the nudge: if it can't move for STALL_TIMEOUT_MS,
+        // ramp a boost (same logic as the main move), reset once it frees. ---
+        unsigned long nowMs = millis();
+        if (abs(leftCurrent - stallRefLeft) > STALL_TICKS ||
+            abs(rightCurrent - stallRefRight) > STALL_TICKS) {
+            stallRefLeft = leftCurrent;
+            stallRefRight = rightCurrent;
+            stallSinceMs = nowMs;
+            stallBoost = 0;
+        } else if (nowMs - stallSinceMs >= STALL_TIMEOUT_MS &&
+                   nowMs - stallLastBoostMs >= STALL_BOOST_INTERVAL_MS) {
+            stallBoost = min(stallBoost + STALL_BOOST_STEP, STALL_MAX_BOOST);
+            stallLastBoostMs = nowMs;
+        }
+
         long leftOvershoot = leftCurrent - leftTargetEncoder;
         long rightOvershoot = rightCurrent - rightTargetEncoder;
-        
+
         bool leftNeedsCorrection = abs(leftOvershoot) > activeDeadband;
         bool rightNeedsCorrection = abs(rightOvershoot) > activeDeadband;
 
-        // --- ORIGINAL INDEPENDENT NUDGING ---
+        // --- ORIGINAL INDEPENDENT NUDGING (with stall boost, clamped to MAX_DUTY) ---
         if (leftNeedsCorrection || rightNeedsCorrection) {
-            
+
             if (leftNeedsCorrection) {
                 leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
-                leftMotor.drive(activeNudgePWM, leftDriveDirection);
+                leftMotor.drive(constrain(activeNudgePWM + stallBoost, 0, robotConfig::MAX_DUTY), leftDriveDirection);
             } else {
                 leftMotor.drive(0, robotConfig::STOPPED);
             }
 
             if (rightNeedsCorrection) {
                 rightDriveDirection = (rightOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
-                rightMotor.drive((int)(activeNudgePWM * activeRightMultiplier), rightDriveDirection);
+                rightMotor.drive(constrain((int)(activeNudgePWM * activeRightMultiplier) + stallBoost, 0, robotConfig::MAX_DUTY), rightDriveDirection);
             } else {
                 rightMotor.drive(0, robotConfig::STOPPED);
             }
-            
+
         } else {
             leftMotor.drive(0, robotConfig::STOPPED);
             rightMotor.drive(0, robotConfig::STOPPED);

@@ -24,7 +24,7 @@ private:
 
     // Hysteresis thresholds (in degrees)
     float rampOnAngle = 9.0f;
-    float rampOffAngle = 2.0f;
+    float rampOffAngle = 3.0f;
 
 public:
     TiltSensor(int sdaPin, int sclPin, uint8_t address = 0x68);
