@@ -331,7 +331,7 @@ private:
     // main.cpp sets from the surface-select pin. Fields: see PanelRemoveParams.
     //                                  predrive turn1  drive  turn2  tSpd  dSpd  arm settle
     PanelRemoveParams panelParams[2] = {
-        /* surface 1 */ {  35.0f, 85.0f, 135.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
+        /* surface 1 */ {  35.0f, 85.0f, 140.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
         /* surface 2 */ {  50.0f, 85.0f, 120.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
     };
 

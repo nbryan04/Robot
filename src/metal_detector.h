@@ -30,7 +30,7 @@ private:
 
 public:
     // Constructor allows you to tune the interval, sensitivity, and PCNT unit.
-    MetalDetector(int pin, unsigned long interval = 100, float thresholdHz = 600,
+    MetalDetector(int pin, unsigned long interval = 100, float thresholdHz = 550,
                   pcnt_unit_t unit = PCNT_UNIT_2);
 
     void begin();
