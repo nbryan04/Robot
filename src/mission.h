@@ -352,4 +352,6 @@ private:
     unsigned long RAMP_SEARCH_MAX_MS = 4000;  // no tilt by here -> recovery
     unsigned long CLIMB_MAX_MS       = 6000;  // no crest by here -> recovery
     unsigned long RAMP_MIN_CLIMB_MS  = 800;   // ignore "flat" right after entry
+
+    float RAMP_MIN_TIME = 10000.0f; // ms, ignore tilt events until this long after the climb starts
 };
