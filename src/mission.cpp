@@ -350,11 +350,14 @@ void Mission::update() {
         drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
         drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
 
-        float rampTime = 0.0f;
+        
         if (tilt.isOnRamp()) {
-            rampTime = millis();
-            rampWasTilted = true;
-          }  // remember we climbed the incline
+            if (!rampWasTilted) {
+                // This is the FIRST moment we detected the ramp
+                rampTime = millis();
+                rampWasTilted = true;
+            }
+        }
 
         bool crestedByTilt = tilt.isPresent() && rampWasTilted && !tilt.isOnRamp() && (millis() - rampTime > RAMP_MIN_TIME);
         float climbed = drive.forwardOdometryMM() - rampClimbOriginMM;

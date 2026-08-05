@@ -23,8 +23,8 @@ private:
     static constexpr float GYRO_LSB_PER_DEG = 131.0f;  // For +/- 250 deg/s range
 
     // Hysteresis thresholds (in degrees)
-    float rampOnAngle = 9.0f;
-    float rampOffAngle = 3.0f;
+    float rampOnAngle = 8.0f;
+    float rampOffAngle = 4.0f;
 
 public:
     TiltSensor(int sdaPin, int sclPin, uint8_t address = 0x68);

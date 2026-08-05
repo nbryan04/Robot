@@ -281,7 +281,7 @@ private:
     float HOP_TURN_SPEED  = 0.15;   // speed for the in-place turn portion of a hop leg
     float HOP_DRIVE_SPEED = 0.20;   // speed for the drive-straight portion of a hop leg
 
-    float SWEEP_ARC        = 55.0f;  // deg, wide arc to cover drift
+    float SWEEP_ARC        = 65.0f;  // deg, wide arc to cover drift
     float SWEEP_SPEED      = 0.15f;
     int   SWEEP_PASSES     = 1;      // sweep+centre passes per rock (2 = one refine pass)
     float MIN_ROCK_ANGLE   = 3.0f;    // deg between start/end edges to count as a rock
@@ -353,5 +353,6 @@ private:
     unsigned long CLIMB_MAX_MS       = 6000;  // no crest by here -> recovery
     unsigned long RAMP_MIN_CLIMB_MS  = 800;   // ignore "flat" right after entry
 
-    float RAMP_MIN_TIME = 10000.0f; // ms, ignore tilt events until this long after the climb starts
+    float RAMP_MIN_TIME = 1000.0f; // ms, ignore tilt events until this long after the climb starts
+    float rampTime = 0.0f;
 };
