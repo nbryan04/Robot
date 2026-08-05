@@ -40,7 +40,8 @@ const int LF_RIGHT_PIN      = 9;
 
 // Competition-surface select. The two surfaces differ ONLY in the solar-panel
 // removal sequence; this pin (read once at boot) picks which parameter set the
-// mission uses. INPUT_PULLUP: open/HIGH = surface 1, tied to GND/LOW = surface 2.
+// mission uses. A switch feeds 3V3 into the pin; INPUT_PULLDOWN holds it LOW when
+// the switch is open. Switch closed/3V3/HIGH = surface 1, open/0V/LOW = surface 2.
 // (GPIO 6 is free now that the OLED is gone.)
 const int SURFACE_SELECT_PIN = 6;
 
@@ -99,16 +100,17 @@ void setup() {
     mission.aimMode = Mission::AIM_EDGE_MIDPOINT;  // aim at the midpoint of the two edges
     mission.returnAfterCentre = true;         // realign: reverse the travel/centre distance back to the arrival pose
 
-    // Surface select (read once at boot): open/HIGH = surface 1, GND/LOW = surface 2.
-    // Only the solar-panel removal parameters differ between the two.
-    pinMode(SURFACE_SELECT_PIN, INPUT_PULLUP);
+    // Surface select (read once at boot): switch feeds 3V3, pulldown holds LOW when
+    // open. 3V3/HIGH = surface 1, 0V/LOW = surface 2. Only the solar-panel removal
+    // parameters differ between the two surfaces.
+    pinMode(SURFACE_SELECT_PIN, INPUT_PULLDOWN);
     mission.panelSurface = (digitalRead(SURFACE_SELECT_PIN) == LOW) ? 1 : 0;
     Serial.printf("[SURFACE] pin%d %s -> surface %d\n", SURFACE_SELECT_PIN,
                   mission.panelSurface == 1 ? "LOW" : "HIGH", mission.panelSurface + 1);
 
     // TEST: panel phase. Jump straight to CREST -> FIND_LINE -> FOLLOW_LINE so the
     // IR beacon detection can be tuned. Set back to COLLECT for a real run.
-    mission.phase = Mission::PANEL;
+    mission.phase = Mission::COLLECT;
 
     mission.begin();
 }
