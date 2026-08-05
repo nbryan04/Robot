@@ -7,7 +7,7 @@ struct Drivetrain {
     Motor& leftMotor;
     Motor& rightMotor;
 
-    enum DriveState { Idle, DrivingStraight, Turning, Braking };
+    enum DriveState { Idle, DrivingStraight, Turning, Braking, Coasting };
     DriveState state = Idle;
 
     // Encoder targeting
@@ -55,6 +55,14 @@ struct Drivetrain {
     void turn(float degrees, float speed);
     void stop();
     void update();
+
+    // Cut drive power and coast to a straight stop using the same active-braking
+    // sync PD that ends a normal straight move -- it keeps both wheels matched (no
+    // curving) while the robot's momentum bleeds off, then settles to Idle. Unlike
+    // driveStraight(0) there is NO position target / nudge; it purely straightens
+    // an existing coast. Use it when an open-loop move (e.g. line following) hands
+    // off to a passive roll-out that must stay straight.
+    void coast();
 
     // True if the active move is stalled out: stall recovery has kicked in (the
     // PWM boost is engaged) and there has STILL been no encoder motion for at

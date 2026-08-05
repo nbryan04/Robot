@@ -274,7 +274,7 @@ private:
         { {0,583},{20.5, 175} },                 // -> rock 1
         { {-45, 275},{45, 400},{-65,10} },                 // -> rock 2
         { {39.5, 340}, },    // -> rock 3: two legs (turn right, then left)
-        { {-35, 190}, {-30, 295} },                 // -> rock 4
+        { {-35, 190}, {-30, 285} },                 // -> rock 4
         { {0, 220} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
         { {90, 120} },                 // -> rock 6 (upper deck)
     };
@@ -332,7 +332,7 @@ private:
     //                                  predrive turn1  drive  turn2  tSpd  dSpd  arm settle
     PanelRemoveParams panelParams[2] = {
         /* surface 1 */ {  35.0f, 85.0f, 135.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
-        /* surface 2 */ {  35.0f, 85.0f, 135.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
+        /* surface 2 */ {  50.0f, 85.0f, 120.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
     };
 
     // The active surface's removal parameters (panelSurface is public config below).

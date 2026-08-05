@@ -837,8 +837,10 @@ void Mission::update() {
             // the select pin) plus a multi-window confirm, so 1kHz and 10kHz are
             // judged independently.
             if (ir.detected()) {
-                drive.leftMotor.drive(0, robotConfig::STOPPED);
-                drive.rightMotor.drive(0, robotConfig::STOPPED);
+                // Cut power but coast to a STRAIGHT stop (smart coast keeps the
+                // wheels matched during the roll-out) so we don't curve off the
+                // beacon before PANEL_REMOVE realigns to the trigger point.
+                drive.coast();
                 line.stop();
                 ir.stop();
                 enter(PANEL_REMOVE);   // removal's first move realigns to the trigger

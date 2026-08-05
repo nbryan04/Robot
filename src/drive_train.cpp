@@ -37,6 +37,17 @@ void Drivetrain::driveStraight(float distanceMM, float speed) {
     state = DrivingStraight;
 }
 
+void Drivetrain::coast() {
+    // Zero the sync reference at the current pose and mark the coast as a forward
+    // straight move, so the Coasting branch below keeps the wheels matched while
+    // momentum bleeds off (no position target -- it just straightens the roll-out).
+    leftStartEncoder = leftMotor.encoder.getCount();
+    rightStartEncoder = rightMotor.encoder.getCount();
+    leftDriveDirection = robotConfig::FORWARD;
+    rightDriveDirection = robotConfig::FORWARD;
+    state = Coasting;
+}
+
 void Drivetrain::turn(float degrees, float speed) {
     float trackWidth = 215; // (mm) 
     float turningCircumference = PI * trackWidth;
@@ -334,6 +345,47 @@ void Drivetrain::update() {
             if (abs(leftMotor.speed()) < finalStopThreshold && abs(rightMotor.speed()) < finalStopThreshold) {
                 state = Idle;
             }
+        }
+    }
+
+    // ---------------------------------------------------------
+    // STATE 3: Smart straight coast (no position target / nudge)
+    // ---------------------------------------------------------
+    // Same active-braking sync PD as the pre-stop coast in Braking, but it only
+    // straightens an existing roll-out and then settles to Idle. Keeps both wheels
+    // matched so the robot decelerates in a straight line with drive power cut.
+    else if (state == Coasting) {
+        float settleSpeedThreshold = 0.03f;
+        if (abs(leftMotor.speed()) > settleSpeedThreshold || abs(rightMotor.speed()) > settleSpeedThreshold) {
+            long leftDistanceMoved = abs(leftCurrent - leftStartEncoder);
+            long rightDistanceMoved = abs(rightCurrent - rightStartEncoder);
+            long posSyncError = leftDistanceMoved - rightDistanceMoved;
+
+            double leftCurrentSpeed = abs(leftMotor.speed());
+            double rightCurrentSpeed = abs(rightMotor.speed());
+            double velSyncError = leftCurrentSpeed - rightCurrentSpeed;
+
+            int correction = (posSyncError * Kp_sync) + (velSyncError * Kv_sync);
+
+            int initialGuessPWM = 120; // matches the Braking pre-stop coast
+            int leftRawPWM = -initialGuessPWM - correction;
+            int rightRawPWM = initialGuessPWM + correction;
+
+            int leftCoastDir = leftDriveDirection;
+            if (leftRawPWM < 0) {
+                leftCoastDir = (leftDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+            }
+            int rightCoastDir = rightDriveDirection;
+            if (rightRawPWM < 0) {
+                rightCoastDir = (rightDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+            }
+
+            leftMotor.drive(constrain(abs(leftRawPWM), 0, robotConfig::MAX_DUTY), leftCoastDir);
+            rightMotor.drive(constrain(abs(rightRawPWM), 0, robotConfig::MAX_DUTY), rightCoastDir);
+        } else {
+            leftMotor.drive(0, robotConfig::STOPPED);
+            rightMotor.drive(0, robotConfig::STOPPED);
+            state = Idle;
         }
     }
 }
