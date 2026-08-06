@@ -134,6 +134,7 @@ void Mission::update() {
                     excursionOriginMM = drive.forwardOdometryMM();  // arrival baseline
                     sweepPass = 0;  // fresh rock: start the sweep-pass count over
                     approachAttempts = 0;  // and its re-approach retry count
+                    rockSweepRetried = false;  // and the rock-2 failsafe re-sweep
                     // NOTE: no tilt->ramp cross-check here. The ramp is entered
                     // deliberately at rocks_visited==4 (subStep 0 -> FIND_LINE), so
                     // a stray isOnRamp() latch (e.g. a grab/turn jolt spiking the
@@ -284,10 +285,68 @@ void Mission::update() {
                             break;
                     }
                     enter(TRAVEL_TO_ROCK);
+                } else if (rocks_visited == 1 && !rockSweepRetried) {
+                    // Rock-2 failsafe: the first sweep found nothing. Nudge +20 deg
+                    // (SWEEP_RETRY_TURN_DEG) and sweep once more. The turn goes into
+                    // clusterHeading like every other sweep rotation, so if this
+                    // second sweep also fails, ADVANCE_CLUSTER's realign undoes it.
+                    rockSweepRetried = true;
+                    drive.turn(SWEEP_RETRY_TURN_DEG, SWEEP_SPEED);
+                    clusterHeading += SWEEP_RETRY_TURN_DEG;
+                    Serial.printf("[SWEEP] rock 2 miss -- retry after +%.0f deg nudge\n",
+                                  SWEEP_RETRY_TURN_DEG);
+                    enter(FIND_ROCK_RETRY);
+                } else if (rocks_visited == 4 || rocks_visited == 5) {
+                    // Rock 5 or 6 failsafe: we couldn't find the rock, but still try
+                    // to salvage the teletubby objective -- return to the arrival pose
+                    // and run a stationary camera scan there before advancing.
+                    enter(FAIL_TELETUBBY_SCAN);
                 } else {
                     // No clean low-high-low blip wide enough to be a rock.
                     enter(ADVANCE_CLUSTER);
                 }
+            }
+        }
+        break;
+
+    // ---- Rock-2 failsafe: wait for the +deg nudge, then re-sweep -----------
+    case FIND_ROCK_RETRY:
+        if (driveIdle()) enter(FIND_ROCK);   // nudge done; FIND_ROCK re-centres + sweeps
+        break;
+
+    // ---- Rock-5/6 failsafe: teletubby scan from the arrival pose -----------
+    // We failed to find the rock on rock 5 or 6. Undo the sweep's rotation to face
+    // the arrival heading again (the sweep is pure rotation, so this restores the
+    // arrival pose), then run the same stationary camera scan TELETUBBY_SWEEP uses.
+    // No rock was found, so we skip the metal/claw and go straight to ADVANCE_CLUSTER.
+    case FAIL_TELETUBBY_SCAN:
+        if (subStep == 0) {
+            // Return to the arrival heading (undo the failed sweep's net rotation).
+            if (fabs(clusterHeading) > 0.5f) {
+                drive.turn(-clusterHeading, SWEEP_SPEED);
+                clusterHeading = 0.0f;
+                subStep = 1;
+            } else {
+                subStep = 2;   // already at the arrival heading
+            }
+        } else if (subStep == 1) {
+            if (driveIdle()) subStep = 2;
+        } else if (subStep == 2) {
+            // Back at the arrival pose. Skip the scan if it's disabled or we already
+            // have both teletubbies; otherwise settle briefly before the camera.
+            if (!enableTeletubbySweep || teletubbies >= 2) {
+                enter(ADVANCE_CLUSTER);
+                break;
+            }
+            Serial.println("[TELETUBBY] rock miss -- scanning from arrival pose");
+            stateTimer = millis();
+            subStep = 3;
+        } else {  // subStep == 3
+            if (millis() - stateTimer >= CAMERA_PRESCAN_DELAY_MS) {
+                if (teletubbies < 2 && camera.checkForTeletubby()) {
+                    teletubbies += 1;
+                }
+                enter(ADVANCE_CLUSTER);
             }
         }
         break;
@@ -594,6 +653,13 @@ void Mission::update() {
                 // spike decays before all samples land, so it can't misfire.
                 if (metalAllAbove) {
                     enter(ENGAGE_CLAW);   // sustained metal
+                } else if (rocks_visited == 5 && rock == 0) {
+                    // Last-resort failsafe: this is the 6th (final) rock and we have
+                    // STILL not found the metal rock on any earlier rock -- grab it
+                    // regardless of the (negative) metal reading rather than finish
+                    // empty-handed. Only fires when rock == 0 (no metal secured yet).
+                    Serial.println("[METAL] final rock, no metal found yet -- grabbing anyway");
+                    enter(ENGAGE_CLAW);
                 } else {
                     enter(RAISE_CLAW);    // decoy / spike only
                 }
@@ -655,18 +721,24 @@ void Mission::update() {
             // one continuous line. Rock 6 (rocks_visited == 5) always takes the
             // normal completion path below instead (so its crest backup still runs).
             if (rock == 1 && teletubbies >= 2 && rocks_visited < 5) {
+                // Early exit at/before rock 4 (rocks_visited <= 3) is still on the
+                // LOWER deck, so the panel line climbs the ramp -> enable the post-
+                // crest creep. An early exit at rock 5 is already up top (no climb).
+                earlyExitClimb = (rocks_visited <= 3);
                 phase = PANEL;
                 enter(CREST);   // panel line-find (spins crestSpinCW) -> follow -> removal
                 break;
             }
 
-            // Skip the post-rock realignment for rocks 4, 5 and 6 (rocks_visited
-            // 3, 4, 5 here, before it is incremented). Rocks 4 and 6 are each
-            // followed immediately by a crest that re-acquires position from the
-            // line, so the realign is wasted; rock 5 is skipped too by request --
-            // its hop to rock 6 (HOP_LEGS[5]) is then measured from the post-collection
-            // pose rather than the arrival pose.
-            if (rocks_visited == 3 || rocks_visited == 4 || rocks_visited == 5) {
+            // Skip the post-rock realignment for rocks 4 and 6 (rocks_visited 3 and
+            // 5 here, before it is incremented): each is followed immediately by a
+            // crest that re-acquires position from the line, so the realign is wasted.
+            // Rock 5 (rocks_visited == 4) skips it too WHEN THE ROCK WAS FOUND -- its
+            // hop to rock 6 (HOP_LEGS[5]) is then measured from the post-collection
+            // pose. But if the rock-5 sweep FAILED to find it, fall through and
+            // realign, so the failed sweep's rotation is undone before that hop.
+            if (rocks_visited == 3 || rocks_visited == 5 ||
+                (rocks_visited == 4 && sweepFound)) {
                 if (stopAfterRock) {
                     enter(HOLD);
                 } else {
@@ -774,6 +846,10 @@ void Mission::update() {
         // select pin and starts background DMA sampling). Guarded: begin()/start
         // abort on an unset pin, so only touch it once IR_ADC_PIN is wired.
         if (robotConfig::IR_ADC_PIN >= 0) ir.startSearch();
+        // Early-exit-before-ramp runs climb the ramp before reaching the beacon, so
+        // hold off considering the IR sensor for IR_COOLDOWN_MS to avoid a false
+        // trigger during the climb. Other runs consider it immediately (0).
+        irConsiderAfterMs = earlyExitClimb ? (millis() + IR_COOLDOWN_MS) : 0;
         enter(FIND_LINE);   // panel phase: find the line, then follow it to the panel
         break;
 
@@ -813,22 +889,69 @@ void Mission::update() {
         if (subStep == 0) {
             irWasAbove = false;      // fresh trigger latch for this follow
             irTriggerValid = false;
+            panelRampWasTilted = false;   // fresh ramp-PWM crest tracking
+            panelRampCrested = false;
+            panelCrestCreepUntil = 0;     // no crest creep pending yet
             subStep = 1;
         }
 
         line.update(ir.lfLeftRaw(), ir.lfMidRaw(), ir.lfRightRaw());  // LF from the IR scan
         double corr = line.getCorrection();
         // On an early exit the continuous panel line can run up the ramp: use the
-        // stronger ramp PWM while the tilt sensor says we're on the incline, then
-        // drop back to the slower panel speed on the flat at the top. Harmless for
-        // the normal (already-upper-deck) case -- it just stays on LINE_BASE_PWM.
-        int base = (tilt.isPresent() && tilt.isOnRamp()) ? RAMP_BASE_PWM : LINE_BASE_PWM;
+        // stronger ramp PWM while climbing, then drop to the slower panel speed once
+        // we CREST. The crest -- not the live tilt reading -- is what turns the slow
+        // PWM on, so we do NOT depend on the tilt sensor staying good to slow down:
+        //   - We latch onto ramp PWM the moment tilt first sees the incline, and
+        //     stay fast (a momentary tilt drop mid-climb won't slow us prematurely).
+        //   - Crest fires on tilt clearing OR a climb-distance cap. The distance cap
+        //     only needs the one ramp-foot detection, not continuous tilt, so even if
+        //     the tilt sensor dies after the foot we are GUARANTEED to slow down.
+        // If tilt never fires at all we simply never speed up -- base stays on the
+        // slower LINE_BASE_PWM throughout (the normal already-upper-deck case too).
+        if (tilt.isPresent() && tilt.isOnRamp() && !panelRampWasTilted) {
+            panelRampWasTilted = true;
+            panelRampTime = millis();
+            panelRampOriginMM = drive.forwardOdometryMM();
+        }
+        if (!panelRampCrested && panelRampWasTilted) {
+            bool crestedByTilt = tilt.isPresent() && !tilt.isOnRamp() &&
+                                 (millis() - panelRampTime > RAMP_MIN_TIME);
+            bool crestedByDist = (drive.forwardOdometryMM() - panelRampOriginMM) >= RAMP_CLIMB_MAX_MM;
+            if (crestedByTilt || crestedByDist) {
+                panelRampCrested = true;
+                // On an early-exit-before-ramp run, creep at CREST_CREEP_PWM for
+                // CREST_CREEP_MS right after cresting to settle onto the flat top.
+                if (earlyExitClimb) panelCrestCreepUntil = millis() + CREST_CREEP_MS;
+                Serial.printf("[PANEL] crest -> %s PWM (%s)\n",
+                              earlyExitClimb ? "creep" : "line",
+                              crestedByTilt ? "tilt" : "dist");
+            }
+        }
+        // Fast from the ramp foot until the CREST latch (tilt OR distance) flips us
+        // to the slower line PWM -- keyed on the latch, not the live tilt reading.
+        // On an early-exit climb, a brief CREST_CREEP_PWM window follows the crest
+        // before we settle to LINE_BASE_PWM.
+        bool climbing = panelRampWasTilted && !panelRampCrested;
+        int base;
+        if (climbing) {
+            base = RAMP_BASE_PWM;
+        } else if (millis() < panelCrestCreepUntil) {
+            base = CREST_CREEP_PWM;
+        } else {
+            base = LINE_BASE_PWM;
+        }
         int leftPWM  = constrain((int)(base + corr), 0, robotConfig::MAX_DUTY);
         int rightPWM = constrain((int)(base - corr), 0, robotConfig::MAX_DUTY);
         drive.leftMotor.drive(leftPWM,  robotConfig::FORWARD);
         drive.rightMotor.drive(rightPWM, robotConfig::FORWARD);
 
-        if (robotConfig::IR_ADC_PIN >= 0) {
+        // Cooldown (early-exit-before-ramp runs only): ignore the IR sensor entirely
+        // until irConsiderAfterMs so a false beacon read during the ramp climb can't
+        // trigger the removal early. Keep irWasAbove reset so the trigger latch starts
+        // clean the instant the cooldown ends.
+        if (robotConfig::IR_ADC_PIN >= 0 && millis() < irConsiderAfterMs) {
+            irWasAbove = false;
+        } else if (robotConfig::IR_ADC_PIN >= 0) {
             // Latch the odometer position where the beacon amplitude FIRST crosses
             // the threshold (the start of an above-threshold streak). detected()
             // only confirms a few windows later, and the robot coasts past. The

@@ -107,6 +107,8 @@ void setup() {
     mission.panelSurface = (digitalRead(SURFACE_SELECT_PIN) == LOW) ? 1 : 0;
     Serial.printf("[SURFACE] pin%d %s -> surface %d\n", SURFACE_SELECT_PIN,
                   mission.panelSurface == 1 ? "LOW" : "HIGH", mission.panelSurface + 1);
+    // Surface 1 uses a slightly higher 10kHz IR threshold; surface 2 the default.
+    irSensor.useSurface1Threshold(mission.panelSurface == 0);
 
     // TEST: panel phase. Jump straight to CREST -> FIND_LINE -> FOLLOW_LINE so the
     // IR beacon detection can be tuned. Set back to COLLECT for a real run.

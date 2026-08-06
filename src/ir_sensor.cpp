@@ -57,7 +57,7 @@ void IR_Sensor::startSearch() {
         _targetFreq = FREQ_LOW;
     } else {                                 // LOW = 10kHz
         _coeff = _coeffHigh;
-        _threshold = THRESHOLD_10K;
+        _threshold = _threshold10k;   // surface-dependent (see useSurface1Threshold)
         _targetFreq = FREQ_HIGH;
     }
 

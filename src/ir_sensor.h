@@ -25,6 +25,12 @@ public:
     void startSearch();  // latch target from select pin, start sampling (IR + LF)
     void stop();         // stop sampling, return to idle
 
+    // The two competition surfaces use different 10kHz detection thresholds:
+    // surface 1 slightly higher, surface 2 the default. Call before startSearch();
+    // if never called it stays on the surface-2 (default) threshold. Only affects
+    // the 10kHz tone -- the 1kHz threshold is unchanged.
+    void useSurface1Threshold(bool on) { _threshold10k = on ? THRESHOLD_10K_S1 : THRESHOLD_10K; }
+
     void update();       // non-blocking: drain samples, run Goertzel, latch LF values
 
     bool  detected() const  { return _state == State::DETECTED; }
@@ -54,7 +60,8 @@ private:
     static constexpr float FREQ_LOW      = 1000.0f;   // select HIGH
     static constexpr float FREQ_HIGH     = 10000.0f;  // select LOW
     static constexpr float THRESHOLD_1K  = 0.08f;     // TBD: calibrate via magnitude()
-    static constexpr float THRESHOLD_10K = 0.025f;     // TBD: calibrate via magnitude()
+    static constexpr float THRESHOLD_10K = 0.025f;    // 10kHz, surface 2 / default
+    static constexpr float THRESHOLD_10K_S1 = 0.025f; // 10kHz, surface 1: slightly higher
     static constexpr int   CONFIRM_COUNT = 4;         // windows in a row above threshold = detected
 
     int _adcPin;
@@ -75,6 +82,7 @@ private:
     // Active window state (chosen at startSearch()).
     float _coeff = 0.0f;
     float _threshold = 0.0f;
+    float _threshold10k = THRESHOLD_10K;  // active 10kHz threshold (surface-dependent)
     float _targetFreq = 0.0f;
 
     // Streaming Goertzel accumulators.

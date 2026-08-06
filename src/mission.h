@@ -60,6 +60,8 @@ public:
         // --- collection ---
         HOP_TO_CLUSTER,   // n1:  dead-reckon to next cluster (or divert to ramp)
         FIND_ROCK,        // n2:  wide ultrasonic sweep
+        FIND_ROCK_RETRY,  // rock-2 failsafe: nudge +SWEEP_RETRY_TURN_DEG, then re-sweep
+        FAIL_TELETUBBY_SCAN, // rock-5/6 failsafe: return to arrival pose, scan teletubby, advance
         TRAVEL_TO_ROCK,   // n3:  drive up to grab distance
         CENTRE_ROCK,      // n4:  face the rock, capture metal reference
         TELETUBBY_SWEEP,  // n5:  camera sweep for coloured blobs
@@ -225,6 +227,8 @@ private:
     int sweepPass = 0;             // sweep+centre passes done at this rock
     int approachAttempts = 0;      // sweep->travel tries at this rock (capped so a
                                    // rock we can't close on doesn't loop forever)
+    bool rockSweepRetried = false; // rock-2 failsafe: a second sweep (after a +deg
+                                   // nudge) has already been tried at this rock
     float clusterHeading = 0.0f;   // net rotation (deg) added by the sweep/approach
                                    // since the hop finished; undone before the next hop
     float excursionOriginMM = 0.0f;// both-wheel odometer reading captured at the
@@ -238,6 +242,17 @@ private:
     // Ramp line-follow bookkeeping.
     float rampClimbOriginMM = 0.0f; // odometer baseline captured when the climb starts
     bool  rampWasTilted = false;    // tilt sensor latched onto the incline during the climb
+    // Panel FOLLOW_LINE ramp-PWM crest (an early exit runs the panel line up the
+    // ramp): drop from RAMP_BASE_PWM to LINE_BASE_PWM once we crest by tilt OR by
+    // climbing RAMP_CLIMB_MAX_MM past the ramp foot (distance fallback if tilt never
+    // clears). Latched so we never climb back onto ramp PWM after cresting.
+    bool  panelRampWasTilted = false;  // tilt latched onto the incline during the panel follow
+    bool  panelRampCrested   = false;  // crest reached -> stay on the slower line PWM
+    float panelRampOriginMM  = 0.0f;   // odometer at ramp entry; climb distance measured from here
+    float panelRampTime      = 0.0f;   // ms when the ramp was first detected (for RAMP_MIN_TIME)
+    bool  earlyExitClimb = false;      // this run early-exited on the LOWER deck (rock <=4),
+                                       // so the panel line climbs the ramp -> crest creep applies
+    unsigned long panelCrestCreepUntil = 0; // creep at CREST_CREEP_PWM until this ms (0 = none)
     float crestForwardOriginMM = 0.0f; // odometer at the crest; the momentum coast is measured from here
     bool  absorbCrestMomentum = false; // hop-5's first drive rides the ramp momentum, then trims to distance
     bool  crestSpinCW = false;         // active panel line-acquire spin direction (latched per rock)
@@ -246,6 +261,7 @@ private:
     float irTriggerMM = 0.0f;       // odometer position where the beacon first crossed threshold
     bool  irTriggerValid = false;   // have we latched a trigger position this FOLLOW_LINE
     bool  irWasAbove = false;       // was the beacon above threshold on the previous window
+    unsigned long irConsiderAfterMs = 0; // ignore IR beacon reads until this ms (early-exit cooldown)
 
     // Per-rock working values.
     float rockBearing = 0.0f;      // deg from post-hop forward
@@ -284,6 +300,9 @@ private:
     float SWEEP_ARC        = 65.0f;  // deg, wide arc to cover drift
     float SWEEP_SPEED      = 0.15f;
     int   SWEEP_PASSES     = 1;      // sweep+centre passes per rock (2 = one refine pass)
+    float SWEEP_RETRY_TURN_DEG = 20.0f;  // rock-2 failsafe: nudge this far (+ = CW) then
+                                         // re-sweep once if the first sweep finds nothing
+                                         // (tracked in clusterHeading so realign undoes it)
     float MIN_ROCK_ANGLE   = 3.0f;    // deg between start/end edges to count as a rock
     float GRAB_DISTANCE_CM = 15.0f;   // target ultrasonic distance at the rock
     float CENTRE_MARGIN_CM = 3.0f;    // acceptable +/- error from the target
@@ -314,6 +333,11 @@ private:
     int LINE_SEEK_PWM = 600;   // in-place rotation speed while hunting for the tape
     int LINE_BASE_PWM = 600;   // forward speed while following the tape at the PANEL
     int RAMP_BASE_PWM = 800;   // forward speed while following the tape up the RAMP (needs more to climb)
+    // Right after cresting on an EARLY-EXIT run that climbed the ramp (both
+    // objectives met at/before rock 4), creep at this reduced PWM for CREST_CREEP_MS
+    // to settle onto the flat top before resuming LINE_BASE_PWM.
+    int CREST_CREEP_PWM = 350;              // gentle PWM just after the crest
+    unsigned long CREST_CREEP_MS = 2000;    // how long to hold CREST_CREEP_PWM
     float LINE_RIGHT_SCALE = 1.07f;  // right motor is weaker: scale its PWM up to match
     // The stop condition (IR beacon) uses IR_Sensor::detected(), which applies the
     // per-tone threshold THRESHOLD_1K / THRESHOLD_10K in ir_sensor.h (selected by
@@ -323,6 +347,11 @@ private:
     // stop is repeatable. Skip the reverse if the overshoot is under this (mm).
     float IR_ALIGN_DEADBAND_MM = 5.0f;
 
+    // On an early-exit-before-ramp run the panel line climbs the ramp before reaching
+    // the beacon, so ignore the IR sensor for this long after the search starts (at
+    // CREST) to avoid a false trigger during the climb. Only applied on those runs.
+    unsigned long IR_COOLDOWN_MS = 5000;
+
     // Panel removal "dance" (runs once the beacon trips in FOLLOW_LINE): lower the
     // arm (hand stays closed), realign to the beacon trigger + a short pre-drive,
     // then turn1 -> straight -> turn2 to sweep the panel off. The TWO competition
@@ -331,7 +360,7 @@ private:
     // main.cpp sets from the surface-select pin. Fields: see PanelRemoveParams.
     //                                  predrive turn1  drive  turn2  tSpd  dSpd  arm settle
     PanelRemoveParams panelParams[2] = {
-        /* surface 1 */ {  35.0f, 85.0f, 140.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
+        /* surface 1 */ {  45.0f, 85.0f, 140.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
         /* surface 2 */ {  50.0f, 85.0f, 120.0f, -90.0f, 0.22f, 0.15f, 45, 700 },
     };
 
