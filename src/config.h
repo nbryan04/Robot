@@ -27,7 +27,7 @@ inline constexpr int LF_THRESHOLD = 1500;  // tape sensing
 
 //Claw constants
 inline constexpr int ARM_UP_ANGLE = 150;
-inline constexpr int ARM_DOWN_ANGLE = 10;
+inline constexpr int ARM_DOWN_ANGLE = 12;
 inline constexpr int HAND_CLOSE_ANGLE = 3;
 inline constexpr int HAND_OPEN_ANGLE = 90;
 
