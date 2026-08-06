@@ -244,8 +244,8 @@ private:
     bool  rampWasTilted = false;    // tilt sensor latched onto the incline during the climb
     // Panel FOLLOW_LINE ramp-PWM crest (an early exit runs the panel line up the
     // ramp): drop from RAMP_BASE_PWM to LINE_BASE_PWM once we crest by tilt OR by
-    // climbing RAMP_CLIMB_MAX_MM past the ramp foot (distance fallback if tilt never
-    // clears). Latched so we never climb back onto ramp PWM after cresting.
+    // climbing rampClimbMaxMM() (per surface) past the ramp foot (distance fallback if
+    // tilt never clears). Latched so we never climb back onto ramp PWM after cresting.
     bool  panelRampWasTilted = false;  // tilt latched onto the incline during the panel follow
     bool  panelRampCrested   = false;  // crest reached -> stay on the slower line PWM
     float panelRampOriginMM  = 0.0f;   // odometer at ramp entry; climb distance measured from here
@@ -287,9 +287,9 @@ private:
     // HOP_LEG_COUNT says how many legs of each row are actually used.
     int HOP_LEG_COUNT[6] = {2, 3, 1, 2, 2, 1};  // rock 3 (index 2) uses 2 legs
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
-        { {0,583},{20.5, 175} },                 // -> rock 1
-        { {-45, 275},{45, 400},{-65,10} },                 // -> rock 2
-        { {39.5, 340}, },    // -> rock 3: two legs (turn right, then left)
+        { {0,583},{22, 175} },                 // -> rock 1
+        { {-45, 275},{45, 400},{-65,20} },                 // -> rock 2
+        { {40.5, 330}, },    // -> rock 3: two legs (turn right, then left)
         { {-35, 190}, {-30, 285} },                 // -> rock 4
         { {0, 220} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
         { {90, 120} },                 // -> rock 6 (upper deck)
@@ -371,8 +371,11 @@ private:
     // tilt sensor (latched onto the incline, then back to flat). Until the IMU is
     // pinned in (tilt.isPresent()==false) that can't fire, so this odometry cap on
     // the forward climb distance is the fallback crest trigger -- and a safety
-    // cap even once the IMU works. Tune to just past the ramp length.
-    float RAMP_CLIMB_MAX_MM = 1500.0f;
+    // cap even once the IMU works. Tune to just past the ramp length. The ramp
+    // length differs slightly between the two competition surfaces, so this is
+    // per-surface (selected by panelSurface); read it via rampClimbMaxMM().
+    float RAMP_CLIMB_MAX_MM_BY_SURFACE[2] = { 1450.0f, 1500.0f }; // [0]=surface 1, [1]=surface 2
+    float rampClimbMaxMM() const { return RAMP_CLIMB_MAX_MM_BY_SURFACE[panelSurface == 1 ? 1 : 0]; }
 
     // Ramp (old dead-reckoned approach; unused now).
     float RAMP_APPROACH_MM = 1000.0f;

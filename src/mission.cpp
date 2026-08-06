@@ -394,7 +394,7 @@ void Mission::update() {
     // ---- Ramp (after rock 4): follow the tape up the ramp to the crest -----
     // Steer directly from the LF correction. Crest = the tilt sensor latched onto
     // the incline and returned to flat; with the IMU unpinned (not present) that
-    // can't fire, so a forward-distance cap (RAMP_CLIMB_MAX_MM) is the fallback.
+    // can't fire, so a forward-distance cap (rampClimbMaxMM(), per surface) is the fallback.
     case RAMP_FOLLOW_LINE: {
         if (subStep == 0) {
             rampClimbOriginMM = drive.forwardOdometryMM();  // baseline the climb distance
@@ -420,7 +420,7 @@ void Mission::update() {
 
         bool crestedByTilt = tilt.isPresent() && rampWasTilted && !tilt.isOnRamp() && (millis() - rampTime > RAMP_MIN_TIME);
         float climbed = drive.forwardOdometryMM() - rampClimbOriginMM;
-        bool crestedByDist = (climbed >= RAMP_CLIMB_MAX_MM);
+        bool crestedByDist = (climbed >= rampClimbMaxMM());
 
         if (crestedByTilt || crestedByDist) {
             // Cut power but DON'T hard-stop: let the climb momentum coast us forward.
@@ -916,7 +916,7 @@ void Mission::update() {
         if (!panelRampCrested && panelRampWasTilted) {
             bool crestedByTilt = tilt.isPresent() && !tilt.isOnRamp() &&
                                  (millis() - panelRampTime > RAMP_MIN_TIME);
-            bool crestedByDist = (drive.forwardOdometryMM() - panelRampOriginMM) >= RAMP_CLIMB_MAX_MM;
+            bool crestedByDist = (drive.forwardOdometryMM() - panelRampOriginMM) >= rampClimbMaxMM();
             if (crestedByTilt || crestedByDist) {
                 panelRampCrested = true;
                 // On an early-exit-before-ramp run, creep at CREST_CREEP_PWM for
