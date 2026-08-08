@@ -289,13 +289,23 @@ private:
     HopLeg HOP_LEGS[6][MAX_HOP_LEGS] = {
         { {0,583},{22, 175} },                 // -> rock 1
         { {-45, 275},{45, 400},{-65,20} },                 // -> rock 2
-        { {40.5, 330}, },    // -> rock 3: two legs (turn right, then left)
-        { {-35, 190}, {-30, 285} },                 // -> rock 4
+        { {41.5, 330}, },    // -> rock 3: two legs (turn right, then left)
+        { {-35, 190}, {-29.5, 285} },                 // -> rock 4
         { {0, 220} },                 // -> (ramp){-50, 350} , {-54.5, 1500}rock 5 (upper deck, after ramp)
         { {90, 120} },                 // -> rock 6 (upper deck)
     };
     float HOP_TURN_SPEED  = 0.15;   // speed for the in-place turn portion of a hop leg
     float HOP_DRIVE_SPEED = 0.20;   // speed for the drive-straight portion of a hop leg
+
+    // Surface 2 crests the ramp earlier (shorter distance cap), so its hop to rock 5
+    // (HOP_LEGS[4]) must reach this much further. Surface 1 uses the leg distance as
+    // written. Applied only to rock 5's DRIVING leg(s) -- a padding {0,0} leg stays 0.
+    float SURFACE2_ROCK5_HOP_EXTRA_MM = 100.0f;
+    float hopLegDistMM(int idx, int leg) const {
+        float d = HOP_LEGS[idx][leg].distMM;
+        if (idx == 4 && panelSurface == 1 && d != 0.0f) d += SURFACE2_ROCK5_HOP_EXTRA_MM;
+        return d;
+    }
 
     float SWEEP_ARC        = 65.0f;  // deg, wide arc to cover drift
     float SWEEP_SPEED      = 0.15f;
@@ -374,7 +384,7 @@ private:
     // cap even once the IMU works. Tune to just past the ramp length. The ramp
     // length differs slightly between the two competition surfaces, so this is
     // per-surface (selected by panelSurface); read it via rampClimbMaxMM().
-    float RAMP_CLIMB_MAX_MM_BY_SURFACE[2] = { 1450.0f, 1500.0f }; // [0]=surface 1, [1]=surface 2
+    float RAMP_CLIMB_MAX_MM_BY_SURFACE[2] = { 1450.0f, 1400.0f }; // [0]=surface 1, [1]=surface 2
     float rampClimbMaxMM() const { return RAMP_CLIMB_MAX_MM_BY_SURFACE[panelSurface == 1 ? 1 : 0]; }
 
     // Ramp (old dead-reckoned approach; unused now).

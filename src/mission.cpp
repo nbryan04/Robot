@@ -106,15 +106,16 @@ void Mission::update() {
                         break;   // still coasting; keep waiting
                     }
                     float coasted = drive.forwardOdometryMM() - crestForwardOriginMM;
-                    float move = HOP_LEGS[idx][hopLeg].distMM - coasted;
+                    float target = hopLegDistMM(idx, hopLeg);   // per-surface (rock-5 bump)
+                    float move = target - coasted;
                     if (fabs(move) > 2.0f) {
                         drive.driveStraight(move, HOP_DRIVE_SPEED);
                     }
                     Serial.printf("[RAMP] crest coast %.0f mm -> trim %.0f (target %.0f)\n",
-                                  coasted, move, HOP_LEGS[idx][hopLeg].distMM);
+                                  coasted, move, target);
                     absorbCrestMomentum = false;
-                } else if (HOP_LEGS[idx][hopLeg].distMM != 0.0f) {
-                    drive.driveStraight(HOP_LEGS[idx][hopLeg].distMM, HOP_DRIVE_SPEED);
+                } else if (hopLegDistMM(idx, hopLeg) != 0.0f) {
+                    drive.driveStraight(hopLegDistMM(idx, hopLeg), HOP_DRIVE_SPEED);
                 }
                 subStep = 2;
             }

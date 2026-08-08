@@ -81,7 +81,7 @@ void setup() {
     if (robotConfig::IR_ADC_PIN >= 0) irSensor.begin();
 
     // Brief pause before the robot starts moving.
-    delay(2000);
+    delay(1000);
 
     // Sweep + centring disabled for now (line-following ramp focus): hop between
     // clusters without the ultrasonic search, and skip the post-centre realign.
