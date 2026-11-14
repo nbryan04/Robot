@@ -1,0 +1,391 @@
+#include "drive_train.h"
+
+Drivetrain::Drivetrain(Motor& left, Motor& right) 
+    : leftMotor(left), rightMotor(right) {}
+
+void Drivetrain::stop() {
+    leftMotor.drive(0, robotConfig::STOPPED);
+    rightMotor.drive(0, robotConfig::STOPPED);
+    state = Idle;
+}
+
+void Drivetrain::driveStraight(float distanceMM, float speed) {
+    float revolutions = distanceMM / robotConfig::WHEEL_1_CIRCUMFERENCE;
+    long ticksToMove = revolutions * robotConfig::PULSES_REV;
+
+    leftStartEncoder = leftMotor.encoder.getCount();
+    rightStartEncoder = rightMotor.encoder.getCount();
+
+    leftTargetEncoder = leftStartEncoder + ticksToMove;
+    rightTargetEncoder = rightStartEncoder + ticksToMove;
+
+    leftDriveDirection = (distanceMM >= 0) ? robotConfig::FORWARD : robotConfig::REVERSE;
+    rightDriveDirection = leftDriveDirection;
+    
+    targetSpeed = abs(speed);
+
+    leftMotor.drive(leftMotor.mapSpeedToDutyCycle(targetSpeed), leftDriveDirection);
+    rightMotor.drive(rightMotor.mapSpeedToDutyCycle(targetSpeed), rightDriveDirection);
+
+    // Arm the stall watch for this move.
+    stallRefLeft = leftStartEncoder;
+    stallRefRight = rightStartEncoder;
+    stallSinceMs = millis();
+    stallLastBoostMs = millis();
+    stallBoost = 0;
+
+    state = DrivingStraight;
+}
+
+void Drivetrain::coast() {
+    // Zero the sync reference at the current pose and mark the coast as a forward
+    // straight move, so the Coasting branch below keeps the wheels matched while
+    // momentum bleeds off (no position target -- it just straightens the roll-out).
+    leftStartEncoder = leftMotor.encoder.getCount();
+    rightStartEncoder = rightMotor.encoder.getCount();
+    leftDriveDirection = robotConfig::FORWARD;
+    rightDriveDirection = robotConfig::FORWARD;
+    state = Coasting;
+}
+
+void Drivetrain::turn(float degrees, float speed) {
+    float trackWidth = 215; // (mm) 
+    float turningCircumference = PI * trackWidth;
+    
+    float distanceMM = turningCircumference * (abs(degrees) / 360.0f);
+
+    float revolutions = distanceMM / robotConfig::WHEEL_1_CIRCUMFERENCE;
+    long ticksToMove = revolutions * robotConfig::PULSES_REV;
+
+    leftStartEncoder = leftMotor.encoder.getCount();
+    rightStartEncoder = rightMotor.encoder.getCount();
+
+    if (degrees >= 0) { // Clockwise
+        leftDriveDirection = robotConfig::FORWARD;
+        rightDriveDirection = robotConfig::REVERSE;
+        
+        leftTargetEncoder = leftStartEncoder + ticksToMove;
+        rightTargetEncoder = rightStartEncoder - ticksToMove;
+    } else { // Counter-Clockwise
+        leftDriveDirection = robotConfig::REVERSE;
+        rightDriveDirection = robotConfig::FORWARD;
+        
+        leftTargetEncoder = leftStartEncoder - ticksToMove;
+        rightTargetEncoder = rightStartEncoder + ticksToMove;
+    }
+
+    targetSpeed = abs(speed);
+
+    leftMotor.drive(leftMotor.mapSpeedToDutyCycle(targetSpeed), leftDriveDirection);
+    rightMotor.drive(rightMotor.mapSpeedToDutyCycle(targetSpeed), rightDriveDirection);
+
+    // Arm the stall watch for this move.
+    stallRefLeft = leftStartEncoder;
+    stallRefRight = rightStartEncoder;
+    stallSinceMs = millis();
+    stallLastBoostMs = millis();
+    stallBoost = 0;
+
+    state = Turning;
+}
+
+float Drivetrain::moveProgress() {
+    long total = leftTargetEncoder - leftStartEncoder;
+    if (total < 0) total = -total;
+    if (total == 0) return 1.0f;
+
+    long done = leftMotor.encoder.getCount() - leftStartEncoder;
+    if (done < 0) done = -done;
+
+    float fraction = (float)done / (float)total;
+    return (fraction > 1.0f) ? 1.0f : fraction;
+}
+
+float Drivetrain::lastMoveDistanceMM() {
+    long delta = leftMotor.encoder.getCount() - leftStartEncoder;
+    return (float)delta * (robotConfig::WHEEL_1_CIRCUMFERENCE / (float)robotConfig::PULSES_REV);
+}
+
+float Drivetrain::forwardOdometryMM() {
+    // Average both wheels: on a straight move both counts climb together; on a
+    // turn one climbs while the other drops, so the average stays put. What is
+    // left is pure forward/back translation of the robot's centre.
+    long left  = (long)leftMotor.encoder.getCount();
+    long right = (long)rightMotor.encoder.getCount();
+    double avgTicks = (left + right) / 2.0;
+    return (float)(avgTicks * (robotConfig::WHEEL_1_CIRCUMFERENCE / (double)robotConfig::PULSES_REV));
+}
+
+void Drivetrain::update() {
+    if (state == Idle) return;
+
+    long leftCurrent = leftMotor.encoder.getCount();
+    long rightCurrent = rightMotor.encoder.getCount();
+
+    // ---------------------------------------------------------
+    // STATE 1: Driving Straight OR Turning (Unified Dynamic Ramp)
+    // ---------------------------------------------------------
+    if (state == DrivingStraight || state == Turning) {
+        
+        long remainingTicks = abs(leftTargetEncoder - leftCurrent);
+        float activeTargetSpeed = targetSpeed;
+        
+        long totalMoveTicks = abs(leftTargetEncoder - leftStartEncoder);
+        long maxSlowdown = robotConfig::PULSES_REV / 2;
+        long slowdownZone = min(maxSlowdown, (totalMoveTicks / 2)); 
+
+        if (remainingTicks < slowdownZone) {
+            float minSafeSpeed = (state == Turning) ? 0.12f : 0.08f; 
+            float progress = (float)remainingTicks / slowdownZone; 
+            activeTargetSpeed = minSafeSpeed + ((targetSpeed - minSafeSpeed) * progress);
+        }
+
+        // --- Stall recovery: if neither encoder has moved for STALL_TIMEOUT_MS,
+        // ramp an extra PWM boost until motion resumes (or we hit the cap). Reset
+        // the watch (and drop the boost) as soon as the wheels are turning. ---
+        unsigned long nowMs = millis();
+        if (abs(leftCurrent - stallRefLeft) > STALL_TICKS ||
+            abs(rightCurrent - stallRefRight) > STALL_TICKS) {
+            stallRefLeft = leftCurrent;
+            stallRefRight = rightCurrent;
+            stallSinceMs = nowMs;
+            stallBoost = 0;
+        } else if (nowMs - stallSinceMs >= STALL_TIMEOUT_MS &&
+                   nowMs - stallLastBoostMs >= STALL_BOOST_INTERVAL_MS) {
+            stallBoost = min(stallBoost + STALL_BOOST_STEP, STALL_MAX_BOOST);
+            stallLastBoostMs = nowMs;
+        }
+
+        int leftBasePWM = leftMotor.mapSpeedToDutyCycle(activeTargetSpeed) + stallBoost;
+        int rightBasePWM = rightMotor.mapSpeedToDutyCycle(activeTargetSpeed) + stallBoost;
+
+        long leftDistanceMoved = abs(leftCurrent - leftStartEncoder);
+        long rightDistanceMoved = abs(rightCurrent - rightStartEncoder);
+        long posSyncError = leftDistanceMoved - rightDistanceMoved; 
+
+        double leftCurrentSpeed = abs(leftMotor.speed());
+        double rightCurrentSpeed = abs(rightMotor.speed());
+        double velSyncError = leftCurrentSpeed - rightCurrentSpeed;
+
+        int correction = (posSyncError * Kp_sync) + (velSyncError * Kv_sync);
+        
+        int leftFinalPWM = constrain(leftBasePWM - correction, 0, robotConfig::MAX_DUTY);
+        int rightFinalPWM = constrain(rightBasePWM + correction, 0, robotConfig::MAX_DUTY);
+
+        leftMotor.drive(leftFinalPWM, leftDriveDirection);
+        rightMotor.drive(rightFinalPWM, rightDriveDirection);
+
+        // --- Anticipate Overshoot Based on Initial Speed ---
+        float expectedOvershootMM = 0.0f;
+        
+        if (state == DrivingStraight) {
+            expectedOvershootMM = (237.5f * targetSpeed);
+            if (expectedOvershootMM < 0.0f) expectedOvershootMM = 0.0f; 
+            
+            float totalMoveMM = (float)totalMoveTicks * (robotConfig::WHEEL_1_CIRCUMFERENCE / (float)robotConfig::PULSES_REV);
+            
+            float maxAnticipationMM = totalMoveMM - 25.0f;
+            if (maxAnticipationMM < 0.0f) maxAnticipationMM = 0.0f; 
+            
+            float halfMoveMM = totalMoveMM / 2.0f;
+            if (maxAnticipationMM > halfMoveMM) {
+                maxAnticipationMM = halfMoveMM;
+            }
+
+            if (expectedOvershootMM > maxAnticipationMM) {
+                expectedOvershootMM = maxAnticipationMM;
+            }
+        }
+
+        long anticipationTicks = (expectedOvershootMM / robotConfig::WHEEL_1_CIRCUMFERENCE) * robotConfig::PULSES_REV;
+
+        long leftStopThreshold = (leftDriveDirection == robotConfig::FORWARD) ? 
+                                 (leftTargetEncoder - anticipationTicks) : 
+                                 (leftTargetEncoder + anticipationTicks);
+                                 
+        long rightStopThreshold = (rightDriveDirection == robotConfig::FORWARD) ? 
+                                  (rightTargetEncoder - anticipationTicks) : 
+                                  (rightTargetEncoder + anticipationTicks);
+
+        bool leftDone = (leftDriveDirection == robotConfig::FORWARD) ? (leftCurrent >= leftStopThreshold) : (leftCurrent <= leftStopThreshold);
+        bool rightDone = (rightDriveDirection == robotConfig::FORWARD) ? (rightCurrent >= rightStopThreshold) : (rightCurrent <= rightStopThreshold);
+
+        if (leftDone || rightDone) {
+            leftMotor.drive(0, robotConfig::STOPPED);
+            rightMotor.drive(0, robotConfig::STOPPED);
+            
+            targetSpeed = 0.0f; // Flag for settling check
+            state = Braking; 
+        }
+    }
+    
+    // ---------------------------------------------------------
+    // STATE 2: Gentle Overshoot Correction 
+    // ---------------------------------------------------------
+    else if (state == Braking) {
+        
+        // --- INFER MOVE TYPE EARLY ---
+        long expectedLeftDelta = leftTargetEncoder - leftStartEncoder;
+        long expectedRightDelta = rightTargetEncoder - rightStartEncoder;
+        bool wasTurnMove = ((expectedLeftDelta > 0) != (expectedRightDelta > 0));
+
+        // --- PRE-STOPPING COAST PHASE (Active Braking PD) ---
+        if (targetSpeed == 0.0f) {
+            float settleSpeedThreshold = 0.03f;
+            if (abs(leftMotor.speed()) > settleSpeedThreshold || abs(rightMotor.speed()) > settleSpeedThreshold) {
+                
+                if (!wasTurnMove) {
+                    long leftDistanceMoved = abs(leftCurrent - leftStartEncoder);
+                    long rightDistanceMoved = abs(rightCurrent - rightStartEncoder);
+                    long posSyncError = leftDistanceMoved - rightDistanceMoved; 
+
+                    double leftCurrentSpeed = abs(leftMotor.speed());
+                    double rightCurrentSpeed = abs(rightMotor.speed());
+                    double velSyncError = leftCurrentSpeed - rightCurrentSpeed;
+
+                    int correction = (posSyncError * Kp_sync) + (velSyncError * Kv_sync);
+                    
+                    int initialGuessPWM = 120; // Configurable constant
+                    
+                    int leftRawPWM = -initialGuessPWM - correction;
+                    int rightRawPWM = initialGuessPWM + correction;
+
+                    int leftCoastDir = leftDriveDirection;
+                    if (leftRawPWM < 0) {
+                        leftCoastDir = (leftDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                    }
+
+                    int rightCoastDir = rightDriveDirection;
+                    if (rightRawPWM < 0) {
+                        rightCoastDir = (rightDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                    }
+
+                    leftMotor.drive(constrain(abs(leftRawPWM), 0, robotConfig::MAX_DUTY), leftCoastDir);
+                    rightMotor.drive(constrain(abs(rightRawPWM), 0, robotConfig::MAX_DUTY), rightCoastDir);
+                } 
+                else {
+                    leftMotor.drive(0, robotConfig::STOPPED);
+                    rightMotor.drive(0, robotConfig::STOPPED);
+                }
+
+                return; // Wait for speed to drop below threshold
+            }
+            targetSpeed = -1.0f;
+            // Arm the stall watch fresh for the NUDGE phase (the pre-stop coast
+            // above is intentionally left out of stall recovery).
+            stallRefLeft = leftCurrent;
+            stallRefRight = rightCurrent;
+            stallSinceMs = millis();
+            stallLastBoostMs = millis();
+            stallBoost = 0;
+        }
+
+        // ==========================================
+        // CONFIGURABLE BRAKING PARAMETERS
+        // ==========================================
+        int straightDeadband = 40;
+        int straightNudgePWM = 470;
+        float straightRightMultiplier = 1.07f;
+        
+        int turnDeadband = 40;
+        int turnNudgePWM = 510;
+        float turnRightMultiplier = 1.07f;
+        // ==========================================
+
+        int activeDeadband = wasTurnMove ? turnDeadband : straightDeadband;
+        int activeNudgePWM = wasTurnMove ? turnNudgePWM : straightNudgePWM;
+        float activeRightMultiplier = wasTurnMove ? turnRightMultiplier : straightRightMultiplier;
+
+        // --- Stall recovery for the nudge: if it can't move for STALL_TIMEOUT_MS,
+        // ramp a boost (same logic as the main move), reset once it frees. ---
+        unsigned long nowMs = millis();
+        if (abs(leftCurrent - stallRefLeft) > STALL_TICKS ||
+            abs(rightCurrent - stallRefRight) > STALL_TICKS) {
+            stallRefLeft = leftCurrent;
+            stallRefRight = rightCurrent;
+            stallSinceMs = nowMs;
+            stallBoost = 0;
+        } else if (nowMs - stallSinceMs >= STALL_TIMEOUT_MS &&
+                   nowMs - stallLastBoostMs >= STALL_BOOST_INTERVAL_MS) {
+            stallBoost = min(stallBoost + STALL_BOOST_STEP, STALL_MAX_BOOST);
+            stallLastBoostMs = nowMs;
+        }
+
+        long leftOvershoot = leftCurrent - leftTargetEncoder;
+        long rightOvershoot = rightCurrent - rightTargetEncoder;
+
+        bool leftNeedsCorrection = abs(leftOvershoot) > activeDeadband;
+        bool rightNeedsCorrection = abs(rightOvershoot) > activeDeadband;
+
+        // --- ORIGINAL INDEPENDENT NUDGING (with stall boost, clamped to MAX_DUTY) ---
+        if (leftNeedsCorrection || rightNeedsCorrection) {
+
+            if (leftNeedsCorrection) {
+                leftDriveDirection = (leftOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                leftMotor.drive(constrain(activeNudgePWM + stallBoost, 0, robotConfig::MAX_DUTY), leftDriveDirection);
+            } else {
+                leftMotor.drive(0, robotConfig::STOPPED);
+            }
+
+            if (rightNeedsCorrection) {
+                rightDriveDirection = (rightOvershoot > 0) ? robotConfig::REVERSE : robotConfig::FORWARD;
+                rightMotor.drive(constrain((int)(activeNudgePWM * activeRightMultiplier) + stallBoost, 0, robotConfig::MAX_DUTY), rightDriveDirection);
+            } else {
+                rightMotor.drive(0, robotConfig::STOPPED);
+            }
+
+        } else {
+            leftMotor.drive(0, robotConfig::STOPPED);
+            rightMotor.drive(0, robotConfig::STOPPED);
+            
+            // --- NEW: Final Complete Stop Check ---
+            // Ensures momentum from the nudge has completely settled before declaring Idle.
+            // Using 0.01f to account for extreme micro-movements or minor sensor noise.
+            float finalStopThreshold = 0.01f;
+            if (abs(leftMotor.speed()) < finalStopThreshold && abs(rightMotor.speed()) < finalStopThreshold) {
+                state = Idle;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------
+    // STATE 3: Smart straight coast (no position target / nudge)
+    // ---------------------------------------------------------
+    // Same active-braking sync PD as the pre-stop coast in Braking, but it only
+    // straightens an existing roll-out and then settles to Idle. Keeps both wheels
+    // matched so the robot decelerates in a straight line with drive power cut.
+    else if (state == Coasting) {
+        float settleSpeedThreshold = 0.03f;
+        if (abs(leftMotor.speed()) > settleSpeedThreshold || abs(rightMotor.speed()) > settleSpeedThreshold) {
+            long leftDistanceMoved = abs(leftCurrent - leftStartEncoder);
+            long rightDistanceMoved = abs(rightCurrent - rightStartEncoder);
+            long posSyncError = leftDistanceMoved - rightDistanceMoved;
+
+            double leftCurrentSpeed = abs(leftMotor.speed());
+            double rightCurrentSpeed = abs(rightMotor.speed());
+            double velSyncError = leftCurrentSpeed - rightCurrentSpeed;
+
+            int correction = (posSyncError * Kp_sync) + (velSyncError * Kv_sync);
+
+            int initialGuessPWM = 120; // matches the Braking pre-stop coast
+            int leftRawPWM = -initialGuessPWM - correction;
+            int rightRawPWM = initialGuessPWM + correction;
+
+            int leftCoastDir = leftDriveDirection;
+            if (leftRawPWM < 0) {
+                leftCoastDir = (leftDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+            }
+            int rightCoastDir = rightDriveDirection;
+            if (rightRawPWM < 0) {
+                rightCoastDir = (rightDriveDirection == robotConfig::FORWARD) ? robotConfig::REVERSE : robotConfig::FORWARD;
+            }
+
+            leftMotor.drive(constrain(abs(leftRawPWM), 0, robotConfig::MAX_DUTY), leftCoastDir);
+            rightMotor.drive(constrain(abs(rightRawPWM), 0, robotConfig::MAX_DUTY), rightCoastDir);
+        } else {
+            leftMotor.drive(0, robotConfig::STOPPED);
+            rightMotor.drive(0, robotConfig::STOPPED);
+            state = Idle;
+        }
+    }
+}
